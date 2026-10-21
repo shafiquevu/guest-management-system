@@ -90,12 +90,14 @@ type Row = {
 };
 
 /** Triage every conversation with a guest message newer than its last triage. */
-export async function triagePending(limit = 8): Promise<{ triaged: number; escalated: number; errors: string[] }> {
-  const out = { triaged: 0, escalated: 0, errors: [] as string[] };
+export type TriageRun = { triaged: number; escalated: number; inputTokens: number; outputTokens: number; errors: string[] };
+
+export async function triagePending(limit = 8, sinceDays = 14): Promise<TriageRun> {
+  const out: TriageRun = { triaged: 0, escalated: 0, inputTokens: 0, outputTokens: 0, errors: [] };
   if (!aiConfigured()) return out;
 
   const db = supabaseAdmin();
-  const since = new Date(Date.now() - 14 * 86_400_000).toISOString();
+  const since = new Date(Date.now() - sinceDays * 86_400_000).toISOString();
   const { data, error } = await db
     .from("conversations")
     .select("id, status, channel, guest_id, property_id, reservation_id, last_inbound_at, ai_triaged_at")
@@ -116,7 +118,7 @@ export async function triagePending(limit = 8): Promise<{ triaged: number; escal
     await Promise.all(
       due.slice(i, i + 3).map(async (c) => {
         try {
-          const r = await triageConversation(c);
+          const r = await triageConversation(c, out);
           out.triaged++;
           if (r?.escalate) out.escalated++;
         } catch (e) {
@@ -128,7 +130,7 @@ export async function triagePending(limit = 8): Promise<{ triaged: number; escal
   return out;
 }
 
-async function triageConversation(c: Row): Promise<TriageResult | null> {
+async function triageConversation(c: Row, run: TriageRun): Promise<TriageResult | null> {
   const db = supabaseAdmin();
   const [{ data: msgs }, { data: property }, { data: reservation }, { data: guest }] = await Promise.all([
     db
@@ -176,6 +178,9 @@ async function triageConversation(c: Row): Promise<TriageResult | null> {
     system: SYSTEM,
     messages: [{ role: "user", content: `${context}\n\n<thread>\n${thread}\n</thread>` }],
   });
+
+  run.inputTokens += response.usage.input_tokens;
+  run.outputTokens += response.usage.output_tokens;
 
   if (response.stop_reason === "refusal" || !response.parsed_output) {
     // Could not read it: put it in front of a person rather than guess.
