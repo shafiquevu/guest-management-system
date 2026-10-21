@@ -11,6 +11,10 @@ type Message = {
 };
 
 type Conversation = {
+    guest_name: string;
+property_name: string;
+check_in: string | null;
+check_out: string | null;
   provider: string;
   channel: string;
   external_booking_id: string;
@@ -103,11 +107,16 @@ export default function Beds24Inbox() {
             >
               <header className="border-b border-slate-200 p-5">
                 <h3 className="text-lg font-semibold">
-                  Booking {conversation.external_booking_id}
+                 {conversation.guest_name} · {conversation.property_name}
                 </h3>
 
                 <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-600">
                   <span>Channel: {conversation.channel}</span>
+                  <span>Booking: {conversation.external_booking_id}</span>
+<span>
+  Stay: {conversation.check_in ?? "Unknown"} to{" "}
+  {conversation.check_out ?? "Unknown"}
+</span>
                   <span>
                     Property: {conversation.external_property_id}
                   </span>

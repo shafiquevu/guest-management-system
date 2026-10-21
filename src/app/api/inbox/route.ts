@@ -113,6 +113,22 @@ try {
 
       return {
         provider: "beds24",
+        guest_name:
+  typeof conversation.guest_name === "string"
+    ? conversation.guest_name
+    : "Guest",
+property_name:
+  typeof conversation.property_name === "string"
+    ? conversation.property_name
+    : "Property",
+check_in:
+  typeof conversation.check_in === "string"
+    ? conversation.check_in
+    : null,
+check_out:
+  typeof conversation.check_out === "string"
+    ? conversation.check_out
+    : null,
         channel: conversation.channel,
         external_booking_id: conversation.external_booking_id,
         external_property_id: conversation.external_property_id,
