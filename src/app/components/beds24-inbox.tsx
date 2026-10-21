@@ -75,7 +75,7 @@ export default function Beds24Inbox() {
           <div>
             <h2 className="text-2xl font-bold">Beds24 Inbox Preview</h2>
             <p className="mt-2 text-sm text-slate-600">
-              Live API data for the booking configured in n8n.
+              Airbnb inbox preview for 2026. Processes the first 15 bookings returned by n8n and displays conversations with messages.
             </p>
           </div>
 
