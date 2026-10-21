@@ -209,7 +209,7 @@ export function Inbox() {
           </div>
         </div>
 
-        <ul className="scroll-thin min-h-0 flex-1 overflow-y-auto">
+        <ul className="scroll-thin relative min-h-0 flex-1 overflow-y-auto">
           {loading && (
             <li className="space-y-3 p-4">
               {[0, 1, 2, 3].map((i) => (
@@ -310,7 +310,7 @@ export function Inbox() {
       </section>
 
       {/* ── details ── */}
-      <aside className="scroll-thin min-h-0 overflow-y-auto border-l border-slate-200 bg-white max-xl:hidden">
+      <aside className="scroll-thin relative min-h-0 overflow-y-auto border-l border-slate-200 bg-white max-xl:hidden">
         {selected && <DetailsPanel key={selected.id} conversation={selected} onChanged={load} />}
       </aside>
     </div>

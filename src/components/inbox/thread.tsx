@@ -245,7 +245,7 @@ export function Thread({
       )}
 
       {/* messages */}
-      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-5 py-4">
+      <div className="scroll-thin relative min-h-0 flex-1 overflow-y-auto px-5 py-4">
         {messages.length === 0 && <p className="text-center text-sm text-slate-500">No messages yet.</p>}
         {rows.map(({ m, newDay, grouped }) => (
           <Fragment key={m.id}>

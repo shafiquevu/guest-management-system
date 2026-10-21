@@ -179,7 +179,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <AppContext value={value}>
-      <div className="flex h-screen">
+      <div className="fixed inset-0 flex overflow-hidden">
         <aside className="flex w-60 shrink-0 flex-col border-r border-slate-200 bg-white max-md:w-16">
           <div className="flex h-14 items-center gap-2.5 border-b border-slate-100 px-4">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-sm font-bold text-white">G</span>
@@ -233,7 +233,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
         </aside>
-        <main className="min-w-0 flex-1 overflow-hidden">{children}</main>
+        <main className="relative min-w-0 flex-1 overflow-hidden">{children}</main>
       </div>
     </AppContext>
   );

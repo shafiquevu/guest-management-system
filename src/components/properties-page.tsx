@@ -97,7 +97,7 @@ export function PropertiesPage() {
           </div>
           <p className="text-xs text-slate-500">Properties appear here automatically once a guest from them writes in.</p>
         </div>
-        <ul className="scroll-thin min-h-0 flex-1 overflow-y-auto">
+        <ul className="scroll-thin relative min-h-0 flex-1 overflow-y-auto">
           {visible.length === 0 && (
             <li><EmptyState icon={<Building2 className="h-5 w-5" />} title="No properties yet" /></li>
           )}
@@ -124,7 +124,7 @@ export function PropertiesPage() {
         </ul>
       </section>
 
-      <section className="scroll-thin min-h-0 overflow-y-auto bg-slate-50">
+      <section className="scroll-thin relative min-h-0 overflow-y-auto bg-slate-50">
         {!selected ? (
           <EmptyState icon={<Building2 className="h-5 w-5" />} title="Select a property" text="Add the details staff need when guests ask: Wi-Fi, check-in, parking and house rules." />
         ) : (
