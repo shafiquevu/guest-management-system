@@ -24,8 +24,18 @@ export async function POST(request: Request) {
     return Response.json({ error: "forbidden" }, { status: 403 });
   }
 
-  const payload = await request.json().catch(() => null);
-  const bookingId = Number(payload?.booking?.id);
+  // Version 2 sends JSON { timeStamp, booking: { id } }; version 1 sends a flat bookId.
+  const url = new URL(request.url);
+  const raw = await request.text().catch(() => "");
+  let payload: Record<string, any> | null = null; // eslint-disable-line @typescript-eslint/no-explicit-any -- untyped webhook body
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    payload = Object.fromEntries(new URLSearchParams(raw));
+  }
+  const bookingId = Number(
+    payload?.booking?.id ?? payload?.bookId ?? payload?.bookid ?? url.searchParams.get("bookid") ?? url.searchParams.get("bookId"),
+  );
   if (!bookingId) return Response.json({ ok: true, ignored: "no booking id" });
 
   const db = supabaseAdmin();
