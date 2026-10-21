@@ -1,10 +1,10 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { AlertCircle, BookOpen, Check, CheckCheck, CheckCircle2, Clock, RotateCcw, Send } from "lucide-react";
+import { AlertCircle, BookOpen, Check, CheckCheck, CheckCircle2, Clock, RotateCcw, Send, ShieldAlert, Sparkles } from "lucide-react";
 import { useApp } from "@/components/app-shell";
 import { Avatar, btn, ChannelBadge, cx } from "@/components/ui";
-import { CHANNEL_LABEL, clock, dayLabel } from "@/lib/format";
+import { CATEGORY_LABEL, CHANNEL_LABEL, clock, dayLabel } from "@/lib/format";
 import { useLoader } from "@/lib/use-loader";
 import type { ConversationRow, StaffOption } from "./inbox";
 
@@ -215,6 +215,34 @@ export function Thread({
           </>
         )}
       </div>
+
+      {/* AI read of the thread */}
+      {conversation.status === "escalated" ? (
+        <div className="flex items-start gap-2.5 border-b border-red-200 bg-red-50 px-5 py-2.5 text-sm">
+          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
+          <div className="min-w-0 flex-1">
+            <p className="font-medium text-red-800">Needs a manager{conversation.ai_flag ? `: ${conversation.ai_flag}` : ""}</p>
+            {conversation.ai_summary && <p className="text-red-700">{conversation.ai_summary}</p>}
+          </div>
+          {canWrite && (
+            <button onClick={() => setStatus("open")} className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100">
+              Clear escalation
+            </button>
+          )}
+        </div>
+      ) : (
+        conversation.ai_summary && (
+          <div className="flex items-start gap-2.5 border-b border-slate-200 bg-indigo-50/60 px-5 py-2 text-sm">
+            <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-indigo-500" />
+            <p className="min-w-0 flex-1 text-slate-700">
+              {conversation.ai_category && conversation.ai_category !== "other" && (
+                <span className="font-medium text-slate-900">{CATEGORY_LABEL[conversation.ai_category] ?? conversation.ai_category} · </span>
+              )}
+              {conversation.ai_summary}
+            </p>
+          </div>
+        )
+      )}
 
       {/* messages */}
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-5 py-4">

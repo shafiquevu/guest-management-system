@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Inbox as InboxIcon, MessageSquareText, Search, Timer } from "lucide-react";
 import { useApp } from "@/components/app-shell";
 import { Chip, cx, EmptyState, field, GuestAvatar, Tabs } from "@/components/ui";
-import { awaitingReply, CHANNEL_LABEL, STAY_STYLE, stayStatus, timeAgo } from "@/lib/format";
+import { awaitingReply, CATEGORY_LABEL, CHANNEL_LABEL, PRIORITY_CHIP, STAY_STYLE, stayStatus, timeAgo } from "@/lib/format";
 import { useLoader } from "@/lib/use-loader";
 import { DetailsPanel } from "./details-panel";
 import { Thread } from "./thread";
@@ -24,6 +24,10 @@ export type ConversationRow = {
   guest: { id: string; full_name: string; email: string | null; phone: string | null } | null;
   property: { id: string; name: string } | null;
   reservation: { confirmation_code: string | null; check_in: string | null; check_out: string | null; status: string | null } | null;
+  ai_category: string | null;
+  ai_priority: string | null;
+  ai_summary: string | null;
+  ai_flag: string | null;
 };
 
 export type StaffOption = { id: string; full_name: string };
@@ -32,6 +36,7 @@ type TabKey = "active" | "waiting" | "resolved" | "all";
 
 const SELECT = `id, channel, status, subject, unread_count, last_message_at, last_inbound_at,
   last_outbound_at, assigned_to, property_id, reservation_id,
+  ai_category, ai_priority, ai_summary, ai_flag,
   guest:guests(id, full_name, email, phone),
   property:properties(id, name),
   reservation:reservations(confirmation_code, check_in, check_out, status)`;
@@ -72,6 +77,8 @@ export function Inbox() {
     setLoadError(null);
     const rows = (data ?? []) as unknown as ConversationRow[];
     setConversations(rows);
+    // Alert emails link to /inbox?c=<id>.
+    setSelectedId((current) => current ?? new URLSearchParams(window.location.search).get("c"));
 
     // Last line of each thread, for the preview.
     const ids = rows.map((r) => r.id);
@@ -135,13 +142,18 @@ export function Inbox() {
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return conversations.filter((c) => {
-      if (!inTab(c, tab)) return false;
-      if (!q) return true;
-      return [c.guest?.full_name, c.guest?.email, c.guest?.phone, c.property?.name, c.reservation?.confirmation_code, c.subject]
-        .filter(Boolean)
-        .some((v) => String(v).toLowerCase().includes(q));
-    });
+    // Escalated, then urgent, float to the top of the open lists; the rest stay newest first.
+    const rank = (c: ConversationRow) =>
+      !ACTIVE.includes(c.status) ? 2 : c.status === "escalated" ? 0 : c.ai_priority === "urgent" ? 1 : 2;
+    return conversations
+      .filter((c) => {
+        if (!inTab(c, tab)) return false;
+        if (!q) return true;
+        return [c.guest?.full_name, c.guest?.email, c.guest?.phone, c.property?.name, c.reservation?.confirmation_code, c.subject, c.ai_summary]
+          .filter(Boolean)
+          .some((v) => String(v).toLowerCase().includes(q));
+      })
+      .sort((a, b) => rank(a) - rank(b));
   }, [conversations, search, tab, inTab]);
 
   const selected = conversations.find((c) => c.id === selectedId) ?? null;
@@ -268,6 +280,12 @@ export function Inbox() {
                       )}
                       {c.status === "escalated" && <Chip className="bg-red-50 text-red-700 ring-red-200">Escalated</Chip>}
                       {c.status === "pending" && <Chip className="bg-slate-100 text-slate-600 ring-slate-200">Pending</Chip>}
+                      {ACTIVE.includes(c.status) && c.ai_priority && PRIORITY_CHIP[c.ai_priority] && (
+                        <Chip className={PRIORITY_CHIP[c.ai_priority]!.className}>{PRIORITY_CHIP[c.ai_priority]!.label}</Chip>
+                      )}
+                      {c.ai_category && c.ai_category !== "other" && (
+                        <Chip className="bg-white text-slate-600 ring-slate-200">{CATEGORY_LABEL[c.ai_category] ?? c.ai_category}</Chip>
+                      )}
                       <span className="ml-auto truncate text-[11px] text-slate-400">{staffName(c.assigned_to) ?? "Unassigned"}</span>
                     </div>
                   </div>

@@ -43,10 +43,23 @@ Staff browser ─▶ Next.js app (inbox, tasks, settings) ───────�
 1. Deploy to Vercel (or any Node host) with the same environment variables.
 2. **n8n schedule** (replaces the old "Beds24 Connection Setup" preview):
    Schedule Trigger every 5 minutes -> HTTP Request
-   `POST https://<app>/api/sync/beds24` with header `x-sync-secret: <SYNC_SECRET>`.
+   `POST https://<app>/api/sync/beds24` with header `x-sync-secret: <SYNC_SECRET>`
+   -> HTTP Request `POST https://<app>/api/jobs/alerts` (same header)
+   -> IF `count > 0` -> send email with `email.to`, `email.subject`, `email.html`.
 3. **Beds24 webhook:** Settings -> Properties -> Access -> Booking Webhook:
    `https://<app>/api/webhooks/beds24?key=<BEDS24_WEBHOOK_KEY>`.
 4. Add staff in Settings; tick the properties each agent handles.
+
+## AI triage and alerts
+
+With `ANTHROPIC_API_KEY` set, every new guest message is read by Claude
+(`src/lib/ai/triage.ts`), which sets the conversation's category, priority and a
+one-line summary. Safety issues, refunds, complaints, damage and legal matters
+are marked **escalated** and get an incident. The AI never writes to a guest.
+
+`/api/jobs/alerts` returns each alert once: escalated threads (to the
+assignee and every admin/manager) and guests waiting longer than
+`ALERT_WAIT_MINUTES` (to the assignee, or the managers if unassigned).
 
 ## Checks
 

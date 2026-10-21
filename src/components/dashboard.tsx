@@ -73,6 +73,7 @@ export function Dashboard() {
     .filter(awaitingReply)
     .sort((a, b) => (a.last_inbound_at ?? "").localeCompare(b.last_inbound_at ?? ""));
   const unread = active.reduce((n, c) => n + (c.unread_count > 0 ? 1 : 0), 0);
+  const escalated = active.filter((c) => c.status === "escalated").length;
   const overdue = tasks
     .filter((t) => t.due_at && t.due_at < new Date().toISOString())
     .sort((a, b) => (a.due_at ?? "").localeCompare(b.due_at ?? ""));
@@ -109,7 +110,7 @@ export function Dashboard() {
         {/* headline numbers */}
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <Stat icon={<MessageCircleWarning className="h-5 w-5" />} tone="amber" label="Guests waiting for a reply" value={waiting.length} hint={waiting[0] ? `Longest: ${timeAgo(waiting[0].last_inbound_at)}` : "All answered"} loading={loading} />
-          <Stat icon={<InboxIcon className="h-5 w-5" />} tone="indigo" label="Open conversations" value={active.length} hint={`${unread} unread`} loading={loading} />
+          <Stat icon={<InboxIcon className="h-5 w-5" />} tone="indigo" label="Open conversations" value={active.length} hint={escalated ? `${escalated} need a manager · ${unread} unread` : `${unread} unread`} loading={loading} />
           <Stat icon={<Clock3 className="h-5 w-5" />} tone="sky" label="Average reply time" value={minutesLabel(replyMinutes)} hint="Last 30 days" loading={loading} />
           <Stat icon={<AlarmClock className="h-5 w-5" />} tone="red" label="Overdue tasks" value={overdue.length} hint={`${tasks.length} open tasks`} loading={loading} />
         </div>

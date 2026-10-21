@@ -151,3 +151,33 @@ export function minutesLabel(minutes: number | null): string {
   if (h < 24) return `${h.toFixed(h < 10 ? 1 : 0)} h`;
   return `${(h / 24).toFixed(1)} d`;
 }
+
+/** What the AI triage agent says a thread is about. */
+export const CATEGORY_LABEL: Record<string, string> = {
+  check_in: "Check-in",
+  check_out: "Check-out",
+  access: "Access",
+  wifi: "Wi-Fi",
+  parking: "Parking",
+  cleaning: "Cleaning",
+  maintenance: "Maintenance",
+  amenities: "Amenities",
+  booking_change: "Booking change",
+  cancellation: "Cancellation",
+  refund: "Refund",
+  payment: "Payment",
+  complaint: "Complaint",
+  noise: "Noise",
+  damage: "Damage",
+  lost_item: "Lost item",
+  local_info: "Local info",
+  emergency: "Emergency",
+  thanks: "Thanks",
+  other: "Other",
+};
+
+/** Only the priorities worth a glance get a chip. */
+export const PRIORITY_CHIP: Record<string, { label: string; className: string } | undefined> = {
+  urgent: { label: "Urgent", className: "bg-red-600 text-white ring-red-600" },
+  high: { label: "High", className: "bg-orange-50 text-orange-700 ring-orange-200" },
+};

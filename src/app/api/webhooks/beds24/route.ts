@@ -1,3 +1,5 @@
+import { after } from "next/server";
+import { triagePending } from "@/lib/ai/triage";
 import { isConfigured } from "@/lib/beds24/client";
 import { secretMatches } from "@/lib/secrets";
 import { organizationId, supabaseAdmin } from "@/lib/supabase/admin";
@@ -49,6 +51,7 @@ export async function POST(request: Request) {
   if (!isConfigured()) return Response.json({ ok: false, error: "Beds24 not connected" }, { status: 503 });
 
   const report = await syncBeds24({ bookingIds: [bookingId], maxAgeDays: 60 });
+  after(() => triagePending());
   await db
     .from("sync_events")
     .update({
