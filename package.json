@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --test --experimental-strip-types tests/map.test.ts",
+    "create-admin": "node scripts/create-admin.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
