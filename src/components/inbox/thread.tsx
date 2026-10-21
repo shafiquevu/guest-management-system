@@ -1,10 +1,10 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { AlertCircle, BookOpen, Check, CheckCheck, CheckCircle2, Clock, RotateCcw, Send, ShieldAlert, Sparkles } from "lucide-react";
+import { AlertCircle, BookOpen, Check, CheckCheck, CheckCircle2, Clock, ImageOff, RotateCcw, Send, ShieldAlert, Sparkles } from "lucide-react";
 import { useApp } from "@/components/app-shell";
 import { Avatar, btn, ChannelBadge, cx } from "@/components/ui";
-import { CATEGORY_LABEL, CHANNEL_LABEL, clock, dayLabel } from "@/lib/format";
+import { CATEGORY_LABEL, CHANNEL_LABEL, clock, dayLabel, parseMessage, type MessageImage } from "@/lib/format";
 import { useLoader } from "@/lib/use-loader";
 import type { ConversationRow, StaffOption } from "./inbox";
 
@@ -37,6 +37,7 @@ export function Thread({
 }) {
   const { supabase, api, canWrite, profile } = useApp();
   const [messages, setMessages] = useState<Message[]>([]);
+  const [photos, setPhotos] = useState<Record<string, string[]>>({});
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -51,8 +52,14 @@ export function Thread({
       .select("id, direction, status, body, content_type, sender_name, provider_error, received_at, sent_at, created_at")
       .eq("conversation_id", conversation.id)
       .order("created_at");
-    setMessages(((data ?? []) as Message[]).sort((a, b) => when(a).localeCompare(when(b))));
-  }, [supabase, conversation.id]);
+    const rows = ((data ?? []) as Message[]).sort((a, b) => when(a).localeCompare(when(b)));
+    setMessages(rows);
+    // Stored copies of photos (the original Airbnb links expire after an hour).
+    if (rows.some((m) => parseMessage(m.body).images.length)) {
+      const res = await api("/api/attachments", { json: { conversationId: conversation.id } });
+      if (res.ok) setPhotos(res.data.byMessage ?? {});
+    }
+  }, [supabase, api, conversation.id]);
   useLoader(load);
 
   const loadSaved = useCallback(async () => {
@@ -276,7 +283,7 @@ export function Thread({
                         : "bg-white text-slate-900 ring-1 ring-slate-200",
                     )}
                   >
-                    <p className="whitespace-pre-wrap wrap-break-word">{m.body}</p>
+                    <MessageBody body={m.body} stored={photos[m.id]} />
                   </div>
                   {!grouped || m.status === "failed" ? (
                     <div className={cx("mt-1 flex items-center gap-1 px-1 text-[11px] text-slate-400", m.direction === "outbound" && "justify-end")}>
@@ -389,5 +396,49 @@ function DeliveryIcon({ status }: { status: Message["status"] }) {
       <span className="sr-only">{map.label}</span>
       <span aria-hidden>{map.label}</span>
     </span>
+  );
+}
+
+/** Text plus any photos (Airbnb sends them as links); the HTML itself is never rendered. */
+function MessageBody({ body, stored }: { body: string | null; stored?: string[] }) {
+  const parsed = parseMessage(body);
+  const text = parsed.text;
+  const images: MessageImage[] = stored?.length ? stored.map((url) => ({ src: url, href: url })) : parsed.images;
+  return (
+    <>
+      {text && <p className="whitespace-pre-wrap wrap-break-word">{text}</p>}
+      {images.length > 0 && (
+        <div className={cx("flex flex-wrap gap-1.5", text && "mt-2")}>
+          {images.map((img) => (
+            <Photo key={img.src} image={img} />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+function Photo({ image }: { image: MessageImage }) {
+  const [broken, setBroken] = useState(false);
+  if (broken) {
+    // Airbnb photo links are signed and expire after a while.
+    return (
+      <a href={image.href} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg bg-black/10 px-2.5 py-1.5 text-xs underline">
+        <ImageOff className="h-3.5 w-3.5" /> Photo expired (view it in Airbnb)
+      </a>
+    );
+  }
+  return (
+    <a href={image.href} target="_blank" rel="noopener noreferrer" className="block overflow-hidden rounded-lg bg-black/5">
+      {/* eslint-disable-next-line @next/next/no-img-element -- signed third-party URLs; next/image would need every host whitelisted */}
+      <img
+        src={image.src}
+        alt="Photo in conversation"
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => setBroken(true)}
+        className="max-h-64 max-w-full object-cover"
+      />
+    </a>
   );
 }

@@ -3,6 +3,7 @@ import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
+import { messagePreview } from "@/lib/format";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 /**
@@ -150,7 +151,7 @@ async function triageConversation(c: Row, run: TriageRun): Promise<TriageResult 
   const thread = (msgs ?? [])
     .filter((m) => m.body && m.content_type !== "system")
     .sort((a, b) => at(a).localeCompare(at(b)))
-    .map((m) => `[${at(m).slice(0, 16).replace("T", " ")}] ${m.direction === "inbound" ? "GUEST" : "STAFF"}: ${m.body}`)
+    .map((m) => `[${at(m).slice(0, 16).replace("T", " ")}] ${m.direction === "inbound" ? "GUEST" : "STAFF"}: ${messagePreview(m.body)}`)
     .join("\n");
 
   const markTriaged = { ai_triaged_at: new Date().toISOString() };

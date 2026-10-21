@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test --experimental-strip-types tests/map.test.ts",
+    "test": "node --test --experimental-strip-types tests/map.test.ts tests/format.test.ts",
     "create-admin": "node scripts/create-admin.mjs"
   },
   "dependencies": {

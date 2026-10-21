@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Inbox as InboxIcon, MessageSquareText, Search, Timer } from "lucide-react";
 import { useApp } from "@/components/app-shell";
 import { Chip, cx, EmptyState, field, GuestAvatar, Tabs } from "@/components/ui";
-import { awaitingReply, CATEGORY_LABEL, CHANNEL_LABEL, PRIORITY_CHIP, STAY_STYLE, stayStatus, timeAgo } from "@/lib/format";
+import { awaitingReply, CATEGORY_LABEL, CHANNEL_LABEL, messagePreview, PRIORITY_CHIP, STAY_STYLE, stayStatus, timeAgo } from "@/lib/format";
 import { useLoader } from "@/lib/use-loader";
 import { DetailsPanel } from "./details-panel";
 import { Thread } from "./thread";
@@ -262,7 +262,7 @@ export function Inbox() {
                     <p className="truncate text-xs text-slate-500">{c.property?.name ?? "No property linked"}</p>
                     <div className="mt-1 flex items-center gap-2">
                       <p className={cx("min-w-0 flex-1 truncate text-sm", unread ? "text-slate-900" : "text-slate-500")}>
-                        {preview ? `${preview.outbound ? "You: " : ""}${preview.body}` : "No messages yet"}
+                        {preview ? `${preview.outbound ? "You: " : ""}${messagePreview(preview.body)}` : "No messages yet"}
                       </p>
                       {unread && (
                         <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-indigo-600 px-1.5 text-[11px] font-semibold text-white">

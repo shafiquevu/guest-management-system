@@ -14,6 +14,7 @@ import {
   threadId,
   type Channel,
 } from "@/lib/beds24/map";
+import { savePhotos } from "@/lib/attachments";
 import { organizationId, supabaseAdmin } from "@/lib/supabase/admin";
 
 /**
@@ -353,9 +354,11 @@ async function syncBooking(
         onConflict: "organization_id,channel,external_message_id",
         ignoreDuplicates: true,
       })
-      .select("direction, content_type");
+      .select("id, body, direction, content_type");
     if (error) throw new Error(`messages: ${error.message}`);
     report.messagesAdded += inserted?.length ?? 0;
+    // Airbnb photo links die after an hour; keep a copy while they still work.
+    await savePhotos(orgId, inserted ?? []);
     newInbound = (inserted ?? []).filter((m) => m.direction === "inbound" && m.content_type !== "system").length;
   }
 

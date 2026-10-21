@@ -181,3 +181,47 @@ export const PRIORITY_CHIP: Record<string, { label: string; className: string } 
   urgent: { label: "Urgent", className: "bg-red-600 text-white ring-red-600" },
   high: { label: "High", className: "bg-orange-50 text-orange-700 ring-orange-200" },
 };
+
+export type MessageImage = { src: string; href: string };
+
+const safeUrl = (u: string | undefined) => (u && /^https:\/\//i.test(u) ? u.replace(/&amp;/g, "&") : null);
+
+/**
+ * Airbnb photos arrive from Beds24 as HTML: <a href="full"><img src="thumb"></a>.
+ * Split a message into plain text plus its images; never render the HTML itself.
+ */
+export function parseMessage(body: string | null | undefined): { text: string; images: MessageImage[] } {
+  const images: MessageImage[] = [];
+  let rest = (body ?? "").replace(/<a\b[^>]*?href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (_m, href: string, inner: string) => {
+    const src = safeUrl(inner.match(/<img\b[^>]*?src="([^"]*)"/i)?.[1]) ?? safeUrl(href);
+    const link = safeUrl(href) ?? src;
+    if (src && link) {
+      images.push({ src, href: link });
+      return "";
+    }
+    return inner;
+  });
+  rest = rest.replace(/<img\b[^>]*?src="([^"]*)"[^>]*>/gi, (_m, src: string) => {
+    const s = safeUrl(src);
+    if (s) images.push({ src: s, href: s });
+    return "";
+  });
+  const text = rest
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
+    .trim();
+  return { text, images };
+}
+
+/** One line for list previews and the AI: text, or "Photo". */
+export function messagePreview(body: string | null | undefined): string {
+  const { text, images } = parseMessage(body);
+  if (text) return images.length ? `📷 ${text}` : text;
+  return images.length ? (images.length > 1 ? `📷 ${images.length} photos` : "📷 Photo") : "";
+}
