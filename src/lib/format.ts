@@ -1,17 +1,18 @@
 export const CHANNEL_LABEL: Record<string, string> = {
   airbnb: "Airbnb",
   booking_com: "Booking.com",
-  beds24: "Beds24",
+  beds24: "Direct",
   whatsapp: "WhatsApp",
   gmail: "Email",
 };
 
-export const CHANNEL_STYLE: Record<string, string> = {
-  airbnb: "bg-rose-100 text-rose-700",
-  booking_com: "bg-blue-100 text-blue-700",
-  beds24: "bg-slate-200 text-slate-700",
-  whatsapp: "bg-green-100 text-green-700",
-  gmail: "bg-amber-100 text-amber-800",
+/** Channel identity: a brand-ish tint plus the name, never colour alone. */
+export const CHANNEL_STYLE: Record<string, { chip: string; dot: string; letter: string }> = {
+  airbnb: { chip: "bg-rose-50 text-rose-700 ring-rose-200", dot: "bg-rose-500", letter: "A" },
+  booking_com: { chip: "bg-blue-50 text-blue-700 ring-blue-200", dot: "bg-blue-600", letter: "B" },
+  beds24: { chip: "bg-slate-100 text-slate-700 ring-slate-200", dot: "bg-slate-500", letter: "D" },
+  whatsapp: { chip: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500", letter: "W" },
+  gmail: { chip: "bg-amber-50 text-amber-800 ring-amber-200", dot: "bg-amber-500", letter: "E" },
 };
 
 export function timeAgo(iso: string | null | undefined): string {
@@ -22,7 +23,13 @@ export function timeAgo(iso: string | null | undefined): string {
   const hours = Math.round(minutes / 60);
   if (hours < 24) return `${hours}h`;
   const days = Math.round(hours / 24);
-  return `${days}d`;
+  if (days < 7) return `${days}d`;
+  return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+export function clock(iso: string | null | undefined): string {
+  if (!iso) return "";
+  return new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
 export function dateTime(iso: string | null | undefined): string {
@@ -37,11 +44,110 @@ export function dateTime(iso: string | null | undefined): string {
 
 export function dateOnly(iso: string | null | undefined): string {
   if (!iso) return "–";
-  return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+  return new Date(iso).toLocaleDateString(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/** "Today", "Yesterday", or a full date -- for separators in a thread. */
+export function dayLabel(iso: string): string {
+  const d = new Date(iso);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return "Today";
+  if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 }
 
 /** True when the guest spoke last and nobody has answered yet. */
 export function awaitingReply(c: { last_inbound_at: string | null; last_outbound_at: string | null }): boolean {
   if (!c.last_inbound_at) return false;
   return !c.last_outbound_at || c.last_inbound_at > c.last_outbound_at;
+}
+
+export type Stay = { label: string; tone: "upcoming" | "soon" | "inhouse" | "past" | "cancelled" };
+
+/** Where the guest is in their stay, from the reservation dates. */
+export function stayStatus(r: {
+  check_in: string | null;
+  check_out: string | null;
+  status?: string | null;
+} | null): Stay | null {
+  if (!r || !r.check_in || !r.check_out) return null;
+  if (r.status === "cancelled") return { label: "Cancelled", tone: "cancelled" };
+  const day = (iso: string) => iso.slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  const inDay = day(r.check_in);
+  const outDay = day(r.check_out);
+  if (today < inDay) {
+    const days = Math.round((Date.parse(inDay) - Date.parse(today)) / 86400000);
+    if (days === 1) return { label: "Arrives tomorrow", tone: "soon" };
+    if (days <= 7) return { label: `Arrives in ${days} days`, tone: "soon" };
+    return { label: "Upcoming", tone: "upcoming" };
+  }
+  if (today === inDay) return { label: "Arrives today", tone: "soon" };
+  if (today < outDay) return { label: "In house", tone: "inhouse" };
+  if (today === outDay) return { label: "Checks out today", tone: "inhouse" };
+  return { label: "Checked out", tone: "past" };
+}
+
+export const STAY_STYLE: Record<Stay["tone"], string> = {
+  upcoming: "bg-sky-50 text-sky-700 ring-sky-200",
+  soon: "bg-violet-50 text-violet-700 ring-violet-200",
+  inhouse: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  past: "bg-slate-100 text-slate-600 ring-slate-200",
+  cancelled: "bg-red-50 text-red-700 ring-red-200",
+};
+
+export const BOOKING_STATUS: Record<string, string> = {
+  new: "Confirmed (new)",
+  confirmed: "Confirmed",
+  request: "Request",
+  inquiry: "Enquiry",
+  cancelled: "Cancelled",
+  black: "Blocked",
+};
+
+/** A stored phone number made readable; adds the + the channels drop. */
+export function prettyPhone(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const digits = raw.replace(/[^\d]/g, "");
+  if (digits.length < 7) return raw;
+  return `+${digits}`;
+}
+
+export function initials(name: string | null | undefined): string {
+  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "?";
+  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
+}
+
+const AVATAR_TINTS = [
+  "bg-indigo-100 text-indigo-700",
+  "bg-teal-100 text-teal-700",
+  "bg-amber-100 text-amber-800",
+  "bg-rose-100 text-rose-700",
+  "bg-sky-100 text-sky-700",
+  "bg-lime-100 text-lime-800",
+  "bg-fuchsia-100 text-fuchsia-700",
+];
+
+/** A stable tint per person, so the same guest always looks the same. */
+export function avatarTint(seed: string | null | undefined): string {
+  let h = 0;
+  for (const ch of seed ?? "") h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return AVATAR_TINTS[h % AVATAR_TINTS.length];
+}
+
+export function minutesLabel(minutes: number | null): string {
+  if (minutes === null || !isFinite(minutes)) return "–";
+  if (minutes < 60) return `${Math.round(minutes)} min`;
+  const h = minutes / 60;
+  if (h < 24) return `${h.toFixed(h < 10 ? 1 : 0)} h`;
+  return `${(h / 24).toFixed(1)} d`;
 }
