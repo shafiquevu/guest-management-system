@@ -1,6 +1,9 @@
 @import "tailwindcss";
 
 :root {
+  /* The app is light only; without this, a dark-mode OS draws native dropdowns
+     dark and their options can come out blank. */
+  color-scheme: light;
   --background: #f6f7f9;
   --foreground: #0f172a;
   --brand: #4f46e5;
@@ -41,13 +44,22 @@ button:disabled {
   cursor: not-allowed;
 }
 
-button:focus-visible,
-a:focus-visible,
-input:focus-visible,
-textarea:focus-visible,
-select:focus-visible {
-  outline: 2px solid var(--brand);
-  outline-offset: 2px;
+/* Default keyboard focus ring. In the base layer so a component's own focus
+   style (e.g. the indigo ring on fields and the reply box) wins over it. */
+@layer base {
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+  }
+}
+
+option {
+  color: #0f172a;
+  background: #ffffff;
 }
 
 /* Thin, quiet scrollbars in the panes */
