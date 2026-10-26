@@ -39,7 +39,7 @@ const PRIORITY: Record<Task["priority"], string> = {
 export function TasksBoard() {
   const { supabase, profile, canWrite } = useApp();
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [staff, setStaff] = useState<{ id: string; full_name: string }[]>([]);
+  const [staff, setStaff] = useState<{ id: string; full_name: string; avatar_url: string | null }[]>([]);
   const [view, setView] = useState<"all" | "mine">("all");
   const [title, setTitle] = useState("");
   const [priority, setPriority] = useState("normal");
@@ -64,8 +64,8 @@ export function TasksBoard() {
   useLoader(load);
 
   const loadStaff = useCallback(async () => {
-    const { data } = await supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name");
-    setStaff((data ?? []) as { id: string; full_name: string }[]);
+    const { data } = await supabase.from("profiles").select("id, full_name, avatar_url").eq("active", true).order("full_name");
+    setStaff((data ?? []) as { id: string; full_name: string; avatar_url: string | null }[]);
   }, [supabase]);
   useLoader(loadStaff);
 
@@ -184,7 +184,7 @@ export function TasksBoard() {
                       </p>
                     )}
                     <div className="mt-2.5 flex items-center gap-2 border-t border-slate-100 pt-2.5">
-                      {name(t.assigned_to) ? <Avatar name={name(t.assigned_to)} size="sm" /> : <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-400"><User className="h-3.5 w-3.5" /></span>}
+                      {name(t.assigned_to) ? <Avatar name={name(t.assigned_to)} src={staff.find((s) => s.id === t.assigned_to)?.avatar_url} size="sm" /> : <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-400"><User className="h-3.5 w-3.5" /></span>}
                       {canWrite ? (
                         <>
                           <select value={t.assigned_to ?? ""} onChange={(e) => assign(t, e.target.value)} className="min-w-0 flex-1 rounded-md border-0 bg-transparent py-1 pr-6 pl-1 text-xs text-slate-600 hover:bg-slate-50" aria-label="Assigned to">

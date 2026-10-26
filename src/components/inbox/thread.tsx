@@ -15,6 +15,7 @@ type Message = {
   body: string | null;
   content_type: string;
   sender_name: string | null;
+  sent_by: string | null;
   provider_error: string | null;
   received_at: string | null;
   sent_at: string | null;
@@ -51,7 +52,7 @@ export function Thread({
   const load = useCallback(async () => {
     const { data } = await supabase
       .from("messages")
-      .select("id, direction, status, body, content_type, sender_name, provider_error, received_at, sent_at, created_at")
+      .select("id, direction, status, body, content_type, sender_name, sent_by, provider_error, received_at, sent_at, created_at")
       .eq("conversation_id", conversation.id)
       .order("created_at");
     const rows = ((data ?? []) as Message[]).sort((a, b) => when(a).localeCompare(when(b)));
@@ -181,6 +182,11 @@ export function Thread({
     onChanged();
   }
 
+  const author = (m: Message) => staff.find((s) => s.id === m.sent_by);
+  // Replies sent from the Airbnb app or Beds24 arrive without a name: Beds24 does not say who wrote them.
+  const replyLabel = (m: Message) =>
+    m.sent_by ? `Replied by ${m.sent_by === profile.id ? "you" : (author(m)?.full_name ?? m.sender_name ?? "staff")}` : "Sent outside the inbox";
+
   const canReply = REPLYABLE.includes(conversation.channel);
   const resolved = conversation.status === "resolved" || conversation.status === "archived";
   const guestName = conversation.guest?.full_name ?? "Guest";
@@ -308,7 +314,7 @@ export function Thread({
                   </div>
                   {!grouped || m.status === "failed" ? (
                     <div className={cx("mt-1 flex items-center gap-1 px-1 text-[11px] text-slate-400", m.direction === "outbound" && "justify-end")}>
-                      {m.direction === "outbound" && <span>{m.sender_name ?? "Host"} ·</span>}
+                      {m.direction === "outbound" && <span>{replyLabel(m)} ·</span>}
                       <span>{clock(when(m))}</span>
                       {m.direction === "outbound" && <DeliveryIcon status={m.status} />}
                     </div>
@@ -325,6 +331,11 @@ export function Thread({
                     </div>
                   )}
                 </div>
+                {m.direction === "outbound" && (
+                  <span className={cx("w-7 shrink-0", grouped && "invisible")} title={replyLabel(m)}>
+                    <Avatar name={author(m)?.full_name ?? "Host"} src={author(m)?.avatar_url} size="sm" />
+                  </span>
+                )}
               </div>
             )}
           </Fragment>

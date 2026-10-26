@@ -24,6 +24,7 @@ export type Profile = {
   full_name: string;
   email: string;
   role: Role;
+  avatar_url: string | null;
 };
 
 type AppContextValue = {
@@ -32,6 +33,8 @@ type AppContextValue = {
   profile: Profile;
   canWrite: boolean;
   isManager: boolean;
+  /** Apply a change to the signed-in profile (e.g. a new photo) without reloading. */
+  updateProfile: (changes: Partial<Profile>) => void;
   // The API returns JSON whose shape depends on the route; callers read the fields they asked for.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   api: (path: string, init?: RequestInit & { json?: unknown }) => Promise<{ ok: boolean; status: number; data: any }>;
@@ -71,7 +74,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       setSession(current);
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, organization_id, full_name, email, role, active")
+        .select("id, organization_id, full_name, email, role, active, avatar_url")
         .eq("id", current.user.id)
         .single();
       if (cancelled) return;
@@ -165,6 +168,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     profile,
     canWrite: profile.role !== "read_only",
     isManager: profile.role === "admin" || profile.role === "manager",
+    updateProfile: (changes) => setProfile((current) => (current ? { ...current, ...changes } : current)),
     api,
   };
 
@@ -217,7 +221,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </nav>
           <div className="border-t border-slate-100 p-3">
             <div className="flex items-center gap-2.5">
-              <Avatar name={profile.full_name} size="sm" />
+              <Avatar name={profile.full_name} src={profile.avatar_url} size="sm" />
               <div className="min-w-0 flex-1 max-md:hidden">
                 <p className="truncate text-sm font-medium text-slate-900">{profile.full_name}</p>
                 <p className="text-xs text-slate-500">{ROLE_LABEL[profile.role]}</p>

@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useState, type FormEvent } from "react";
-import { KeyRound, RefreshCw, UserPlus } from "lucide-react";
+import { useCallback, useRef, useState, type FormEvent } from "react";
+import { Camera, KeyRound, RefreshCw, UserPlus } from "lucide-react";
 import { useApp, type Role } from "@/components/app-shell";
 import { Avatar, btn, Card, Chip, cx, field, PageHeader } from "@/components/ui";
 import { dateTime } from "@/lib/format";
 import { useLoader } from "@/lib/use-loader";
 
-type StaffRow = { id: string; full_name: string; email: string; role: Role; active: boolean };
+type StaffRow = { id: string; full_name: string; email: string; role: Role; active: boolean; avatar_url: string | null };
 type Connection = { id: string; channel: string; display_name: string; active: boolean; last_sync_at: string | null; last_error: string | null };
 
 const ROLES: { key: Role; label: string; help: string }[] = [
@@ -18,7 +18,7 @@ const ROLES: { key: Role; label: string; help: string }[] = [
 ];
 
 export function SettingsPanel() {
-  const { supabase, profile, api, isManager } = useApp();
+  const { supabase, profile, api, isManager, updateProfile } = useApp();
   const isAdmin = profile.role === "admin";
 
   const [staff, setStaff] = useState<StaffRow[]>([]);
@@ -32,7 +32,7 @@ export function SettingsPanel() {
 
   const load = useCallback(async () => {
     const [{ data: s }, { data: p }, { data: ps }, { data: c }] = await Promise.all([
-      supabase.from("profiles").select("id, full_name, email, role, active").order("full_name"),
+      supabase.from("profiles").select("id, full_name, email, role, active, avatar_url").order("full_name"),
       supabase.from("properties").select("id, name").order("name"),
       supabase.from("property_staff").select("profile_id, property_id"),
       supabase.from("channel_connections").select("id, channel, display_name, active, last_sync_at, last_error"),
@@ -71,6 +71,16 @@ export function SettingsPanel() {
   async function patchStaff(id: string, changes: Record<string, unknown>) {
     const res = await api("/api/admin/staff", { method: "PATCH", json: { id, ...changes } });
     if (!res.ok) setNotice({ ok: false, text: res.data.error ?? "Could not save." });
+    load();
+  }
+
+  async function setPhoto(profileId: string, file: File | null) {
+    const res = file
+      ? await api("/api/profile/photo", { method: "POST", body: photoForm(file, profileId) })
+      : await api("/api/profile/photo", { method: "DELETE", json: { profileId } });
+    if (!res.ok) return setNotice({ ok: false, text: res.data.error ?? "Could not save the photo." });
+    if (profileId === profile.id) updateProfile({ avatar_url: file ? res.data.avatarUrl : null });
+    setNotice({ ok: true, text: file ? "Photo saved." : "Photo removed." });
     load();
   }
 
@@ -145,7 +155,7 @@ export function SettingsPanel() {
                     <tr key={s.id} className="align-top">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2.5">
-                          <Avatar name={s.full_name} size="sm" />
+                          <PhotoPicker name={s.full_name} src={s.avatar_url} onPick={(file) => setPhoto(s.id, file)} />
                           <div>
                             <p className="font-medium text-slate-900">{s.full_name}</p>
                             <p className="text-xs text-slate-500">{s.email}</p>
@@ -210,6 +220,20 @@ export function SettingsPanel() {
           </Card>
         )}
 
+        <Card title="Your photo">
+          <div className="flex items-center gap-4">
+            <PhotoPicker name={profile.full_name} src={profile.avatar_url} size="lg" onPick={(file) => setPhoto(profile.id, file)} />
+            <p className="text-sm text-slate-600">
+              Shown next to your replies and on conversations assigned to you. Click it to change it.
+              {profile.avatar_url && (
+                <button onClick={() => setPhoto(profile.id, null)} className="ml-2 font-medium text-slate-500 underline hover:text-slate-800">
+                  Remove
+                </button>
+              )}
+            </p>
+          </div>
+        </Card>
+
         <Card title="Your password">
           <form onSubmit={changePassword} className="flex max-w-lg gap-2">
             <input type="password" minLength={10} placeholder="New password (10+ characters)" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className={field} aria-label="New password" />
@@ -218,5 +242,46 @@ export function SettingsPanel() {
         </Card>
       </div>
     </div>
+  );
+}
+
+function photoForm(file: File, profileId: string) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("profileId", profileId);
+  return form;
+}
+
+/** A staff photo that opens a file picker when clicked. */
+function PhotoPicker({
+  name,
+  src,
+  size = "sm",
+  onPick,
+}: {
+  name: string;
+  src: string | null;
+  size?: "sm" | "lg";
+  onPick: (file: File) => void;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  return (
+    <button type="button" onClick={() => input.current?.click()} className="group relative shrink-0 rounded-full" title={`Change ${name}'s photo`}>
+      <Avatar name={name} src={src} size={size} />
+      <span className="absolute inset-0 flex items-center justify-center rounded-full bg-slate-900/50 text-white opacity-0 transition group-hover:opacity-100">
+        <Camera className={size === "lg" ? "h-4 w-4" : "h-3 w-3"} />
+      </span>
+      <input
+        ref={input}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) onPick(file);
+          e.target.value = "";
+        }}
+      />
+    </button>
   );
 }

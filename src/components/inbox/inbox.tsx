@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Inbox as InboxIcon, MessageSquareText, Search, Timer } from "lucide-react";
 import { useApp } from "@/components/app-shell";
-import { Chip, cx, EmptyState, field, GuestAvatar, Tabs } from "@/components/ui";
+import { Avatar, Chip, cx, EmptyState, field, GuestAvatar, Tabs } from "@/components/ui";
 import { awaitingReply, CATEGORY_LABEL, CHANNEL_LABEL, messagePreview, PRIORITY_CHIP, STAY_STYLE, stayStatus, timeAgo } from "@/lib/format";
 import { useLoader } from "@/lib/use-loader";
 import { DetailsPanel } from "./details-panel";
@@ -30,7 +30,7 @@ export type ConversationRow = {
   ai_flag: string | null;
 };
 
-export type StaffOption = { id: string; full_name: string };
+export type StaffOption = { id: string; full_name: string; avatar_url: string | null };
 
 type TabKey = "active" | "waiting" | "resolved" | "all";
 
@@ -46,7 +46,7 @@ const ACTIVE = ["open", "pending", "escalated"];
 export function Inbox() {
   const { supabase, profile } = useApp();
   const [conversations, setConversations] = useState<ConversationRow[]>([]);
-  const [previews, setPreviews] = useState<Record<string, { body: string; outbound: boolean }>>({});
+  const [previews, setPreviews] = useState<Record<string, { body: string; outbound: boolean; sentBy: string | null }>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -56,7 +56,10 @@ export function Inbox() {
   const [tab, setTab] = useState<TabKey>("active");
   const [channel, setChannel] = useState("");
   const [propertyId, setPropertyId] = useState("");
-  const [assignee, setAssignee] = useState<"all" | "me" | "unassigned">("all");
+  // "all", "me", "unassigned" or a staff member's id.
+  const [assignee, setAssignee] = useState("all");
+  // "" or the id of a staff member who has replied in the thread.
+  const [repliedBy, setRepliedBy] = useState("");
   const [search, setSearch] = useState("");
 
   const load = useCallback(async () => {
@@ -67,7 +70,18 @@ export function Inbox() {
     if (channel) query = query.eq("channel", channel);
     if (propertyId) query = query.eq("property_id", propertyId);
     if (assignee === "me") query = query.eq("assigned_to", profile.id);
-    if (assignee === "unassigned") query = query.is("assigned_to", null);
+    else if (assignee === "unassigned") query = query.is("assigned_to", null);
+    else if (assignee !== "all") query = query.eq("assigned_to", assignee);
+    if (repliedBy) {
+      const { data: replied } = await supabase
+        .from("messages")
+        .select("conversation_id")
+        .eq("sent_by", repliedBy)
+        .eq("direction", "outbound")
+        .limit(5000);
+      const ids = [...new Set((replied ?? []).map((m) => m.conversation_id as string))];
+      query = query.in("id", ids.length ? ids : ["00000000-0000-0000-0000-000000000000"]);
+    }
     const { data, error } = await query.limit(500);
     setLoading(false);
     if (error) {
@@ -85,24 +99,26 @@ export function Inbox() {
     if (ids.length) {
       const { data: msgs } = await supabase
         .from("messages")
-        .select("conversation_id, body, direction, content_type, created_at")
+        .select("conversation_id, body, direction, content_type, sent_by, created_at")
         .in("conversation_id", ids.slice(0, 200))
         .neq("content_type", "system")
         .order("created_at", { ascending: false })
         .limit(1000);
-      const map: Record<string, { body: string; outbound: boolean }> = {};
+      const map: Record<string, { body: string; outbound: boolean; sentBy: string | null }> = {};
       for (const m of msgs ?? []) {
-        if (!map[m.conversation_id]) map[m.conversation_id] = { body: m.body ?? "", outbound: m.direction === "outbound" };
+        if (!map[m.conversation_id]) {
+          map[m.conversation_id] = { body: m.body ?? "", outbound: m.direction === "outbound", sentBy: m.sent_by };
+        }
       }
       setPreviews(map);
     }
-  }, [supabase, channel, propertyId, assignee, profile.id]);
+  }, [supabase, channel, propertyId, assignee, repliedBy, profile.id]);
 
   useLoader(load);
 
   const loadOptions = useCallback(async () => {
     const [s, p] = await Promise.all([
-      supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name"),
+      supabase.from("profiles").select("id, full_name, avatar_url").eq("active", true).order("full_name"),
       supabase.from("properties").select("id, name").order("name"),
     ]);
     setStaff((s.data ?? []) as StaffOption[]);
@@ -157,7 +173,11 @@ export function Inbox() {
   }, [conversations, search, tab, inTab]);
 
   const selected = conversations.find((c) => c.id === selectedId) ?? null;
-  const staffName = (id: string | null) => staff.find((s) => s.id === id)?.full_name;
+  const assignedTo = (id: string | null) => staff.find((s) => s.id === id);
+  const staffName = (id: string | null) => assignedTo(id)?.full_name;
+  // Who wrote the last reply: you, a named colleague, or someone outside the inbox (Airbnb app, Beds24).
+  const replier = (sentBy: string | null) =>
+    sentBy === profile.id ? "You" : (staffName(sentBy)?.split(" ")[0] ?? "Host");
 
   return (
     <div className="grid h-full grid-cols-[360px_minmax(0,1fr)_340px] max-xl:grid-cols-[340px_minmax(0,1fr)]">
@@ -195,12 +215,21 @@ export function Inbox() {
                 <option key={k} value={k}>{v}</option>
               ))}
             </select>
-            <select value={assignee} onChange={(e) => setAssignee(e.target.value as typeof assignee)} className={cx(field, "py-1.5 text-xs")} aria-label="Assigned to">
-              <option value="all">Everyone</option>
+            <select value={assignee} onChange={(e) => setAssignee(e.target.value)} className={cx(field, "py-1.5 text-xs")} aria-label="Assigned to">
+              <option value="all">Assigned: anyone</option>
               <option value="me">Assigned to me</option>
               <option value="unassigned">Unassigned</option>
+              {staff.filter((s) => s.id !== profile.id).map((s) => (
+                <option key={s.id} value={s.id}>Assigned to {s.full_name}</option>
+              ))}
             </select>
-            <select value={propertyId} onChange={(e) => setPropertyId(e.target.value)} className={cx(field, "col-span-2 py-1.5 text-xs")} aria-label="Property">
+            <select value={repliedBy} onChange={(e) => setRepliedBy(e.target.value)} className={cx(field, "py-1.5 text-xs")} aria-label="Replied by">
+              <option value="">Replied by: anyone</option>
+              {staff.map((s) => (
+                <option key={s.id} value={s.id}>Replied by {s.id === profile.id ? "me" : s.full_name}</option>
+              ))}
+            </select>
+            <select value={propertyId} onChange={(e) => setPropertyId(e.target.value)} className={cx(field, "py-1.5 text-xs")} aria-label="Property">
               <option value="">All properties</option>
               {properties.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
@@ -262,7 +291,7 @@ export function Inbox() {
                     <p className="truncate text-xs text-slate-500">{c.property?.name ?? "No property linked"}</p>
                     <div className="mt-1 flex items-center gap-2">
                       <p className={cx("min-w-0 flex-1 truncate text-sm", unread ? "text-slate-900" : "text-slate-500")}>
-                        {preview ? `${preview.outbound ? "You: " : ""}${messagePreview(preview.body)}` : "No messages yet"}
+                        {preview ? `${preview.outbound ? `${replier(preview.sentBy)}: ` : ""}${messagePreview(preview.body)}` : "No messages yet"}
                       </p>
                       {unread && (
                         <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-indigo-600 px-1.5 text-[11px] font-semibold text-white">
@@ -286,7 +315,10 @@ export function Inbox() {
                       {c.ai_category && c.ai_category !== "other" && (
                         <Chip className="bg-white text-slate-600 ring-slate-200">{CATEGORY_LABEL[c.ai_category] ?? c.ai_category}</Chip>
                       )}
-                      <span className="ml-auto truncate text-[11px] text-slate-400">{staffName(c.assigned_to) ?? "Unassigned"}</span>
+                      <span className="ml-auto flex min-w-0 items-center gap-1 truncate text-[11px] text-slate-400">
+                        {assignedTo(c.assigned_to) && <Avatar name={assignedTo(c.assigned_to)!.full_name} src={assignedTo(c.assigned_to)!.avatar_url} size="xs" />}
+                        {staffName(c.assigned_to) ?? "Unassigned"}
+                      </span>
                     </div>
                   </div>
                 </button>

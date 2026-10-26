@@ -51,7 +51,14 @@ Staff browser ─▶ Next.js app (inbox, tasks, settings) ───────�
    Both are in `n8n/guest-inbox-sync-and-alerts.json`, ready to import.
 3. **Beds24 webhook:** Settings -> Properties -> Access -> Booking Webhook:
    `https://<app>/api/webhooks/beds24?key=<BEDS24_WEBHOOK_KEY>`.
-4. Add staff in Settings; tick the properties each agent handles.
+4. Add staff in Settings; tick the properties each agent handles. Click a
+   person's photo to set it (`supabase/migrations/004_staff_photos.sql` must
+   have been run).
+
+Every reply sent from the inbox records who sent it ("Replied by …", with their
+photo), and the inbox can be filtered by who a conversation is assigned to and
+who has replied. Replies typed in the Airbnb app or Beds24 show as "Sent outside
+the inbox": Beds24 does not say who wrote them.
 
 ## AI triage and alerts
 

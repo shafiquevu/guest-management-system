@@ -20,8 +20,21 @@ export const btn = {
 export const field =
   "w-full rounded-lg border-0 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm ring-1 ring-slate-200 placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50 disabled:text-slate-500";
 
-export function Avatar({ name, size = "md" }: { name: string | null | undefined; size?: "sm" | "md" | "lg" }) {
-  const dims = { sm: "h-7 w-7 text-[11px]", md: "h-9 w-9 text-xs", lg: "h-12 w-12 text-sm" }[size];
+export function Avatar({
+  name,
+  src,
+  size = "md",
+}: {
+  name: string | null | undefined;
+  /** A staff photo; without one, the initials. */
+  src?: string | null;
+  size?: "xs" | "sm" | "md" | "lg";
+}) {
+  const dims = { xs: "h-4 w-4 text-[8px]", sm: "h-7 w-7 text-[11px]", md: "h-9 w-9 text-xs", lg: "h-12 w-12 text-sm" }[size];
+  if (src) {
+    // eslint-disable-next-line @next/next/no-img-element -- small remote photo, no optimisation needed
+    return <img src={src} alt="" className={cx("shrink-0 rounded-full object-cover", dims)} aria-hidden />;
+  }
   return (
     <span
       className={cx("inline-flex shrink-0 items-center justify-center rounded-full font-semibold", dims, avatarTint(name))}
