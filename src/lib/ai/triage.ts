@@ -49,6 +49,14 @@ const Triage = z.object({
   escalate: z.boolean(),
   escalation_reason: z.string().nullable().describe("Why a manager must handle this; null when escalate is false."),
   confidence: z.number().min(0).max(1),
+  task: z
+    .object({
+      title: z.string().describe("Short action for staff, e.g. \"Fix the bedroom radiator\"."),
+      kind: z.enum(["maintenance", "cleaning", "amenities", "access", "booking_change", "lost_item", "other"]),
+      due: z.enum(["within_hour", "today", "before_check_in", "no_deadline"]),
+    })
+    .nullable()
+    .describe("Work staff must do beyond replying; null when a reply is enough."),
 });
 export type TriageResult = z.infer<typeof Triage>;
 
@@ -66,6 +74,7 @@ For the conversation you are given, return:
 - escalate: true when a manager, not a regular staff member, must handle it: any safety issue (fire, gas, smoke, flooding, injury, break-in, threat), a request for a refund or compensation, a formal complaint or bad-review threat, damage to the property, a legal or police matter, discrimination, or a guest who is clearly angry. Otherwise false.
 - escalation_reason: a short reason when escalate is true, else null.
 - confidence: how sure you are, 0 to 1.
+- task: when staff must do something beyond replying (fix or check something, clean, bring extra towels or supplies, arrange an early check-in or late check-out, look for a lost item, change the booking), a short action title, its kind, and when it is due. null when a reply alone is enough, or when staff already said in the thread that it is done.
 
 Judge the guest's latest messages in the light of the whole thread. If staff have already answered the latest request, use low priority and needs_reply false.
 
@@ -207,7 +216,55 @@ async function triageConversation(c: Row, run: TriageRun): Promise<TriageResult 
     .eq("id", c.id);
 
   if (r.escalate) await openIncident(c, r);
+  if (r.task) await openTask(c, r);
   return r;
+}
+
+const TASK_PRIORITY: Record<TriageResult["priority"], string> = { low: "low", normal: "normal", high: "high", urgent: "urgent" };
+
+/**
+ * One open AI task per conversation and kind: a guest who asks twice about the
+ * same radiator does not get two tasks. Staff created tasks are never touched.
+ */
+async function openTask(c: Row, r: TriageResult) {
+  const t = r.task!;
+  const db = supabaseAdmin();
+  const category = `ai_${t.kind}`;
+  const { data: existing } = await db
+    .from("tasks")
+    .select("id")
+    .eq("conversation_id", c.id)
+    .eq("category", category)
+    .in("status", ["open", "in_progress", "waiting", "overdue"])
+    .limit(1)
+    .maybeSingle();
+  if (existing) return;
+
+  let due: string | null = null;
+  if (t.due === "within_hour") due = new Date(Date.now() + 3_600_000).toISOString();
+  else if (t.due === "today") {
+    const d = new Date();
+    d.setUTCHours(18, 0, 0, 0);
+    due = (d.getTime() > Date.now() ? d : new Date(Date.now() + 3_600_000)).toISOString();
+  } else if (t.due === "before_check_in" && c.reservation_id) {
+    const { data: res } = await db.from("reservations").select("check_in").eq("id", c.reservation_id).maybeSingle();
+    due = res?.check_in ?? null;
+  }
+
+  const { data: conv } = await db.from("conversations").select("organization_id, assigned_to").eq("id", c.id).single();
+  await db.from("tasks").insert({
+    organization_id: conv!.organization_id,
+    conversation_id: c.id,
+    property_id: c.property_id,
+    reservation_id: c.reservation_id,
+    guest_id: c.guest_id,
+    title: t.title,
+    description: `From the guest's message: ${r.summary}`,
+    category,
+    priority: TASK_PRIORITY[r.priority],
+    assigned_to: conv!.assigned_to,
+    due_at: due,
+  });
 }
 
 /** One open incident per conversation; a later escalation adds to it. */

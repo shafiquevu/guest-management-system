@@ -172,6 +172,7 @@ export function TasksBoard() {
                   <article key={t.id} className="rounded-lg bg-white p-3 shadow-sm ring-1 ring-slate-200">
                     <div className="flex items-start gap-2">
                       <p className={cx("flex-1 text-sm font-medium text-slate-900", t.status === "completed" && "text-slate-400 line-through")}>{t.title}</p>
+                      {t.category.startsWith("ai_") && <Chip className="bg-indigo-50 text-indigo-700">From AI</Chip>}
                       <Chip className={PRIORITY[t.priority]}>{t.priority}</Chip>
                     </div>
                     {(t.guest || t.property) && (

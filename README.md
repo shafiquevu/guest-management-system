@@ -46,6 +46,9 @@ Staff browser ─▶ Next.js app (inbox, tasks, settings) ───────�
    `POST https://<app>/api/sync/beds24` with header `x-sync-secret: <SYNC_SECRET>`
    -> HTTP Request `POST https://<app>/api/jobs/alerts` (same header)
    -> IF `count > 0` -> send email with `email.to`, `email.subject`, `email.html`.
+   Second branch, every morning at 8:00 (Europe/London): `POST https://<app>/api/jobs/daily-summary`
+   (same header) -> send its `email` to the managers.
+   Both are in `n8n/guest-inbox-sync-and-alerts.json`, ready to import.
 3. **Beds24 webhook:** Settings -> Properties -> Access -> Booking Webhook:
    `https://<app>/api/webhooks/beds24?key=<BEDS24_WEBHOOK_KEY>`.
 4. Add staff in Settings; tick the properties each agent handles.
@@ -57,9 +60,19 @@ With `ANTHROPIC_API_KEY` set, every new guest message is read by Claude
 one-line summary. Safety issues, refunds, complaints, damage and legal matters
 are marked **escalated** and get an incident. The AI never writes to a guest.
 
+When the guest needs something done (a repair, cleaning, extra supplies, a
+booking change), triage also opens a task, tagged "From AI" on the task board,
+one per conversation and kind.
+
 `/api/jobs/alerts` returns each alert once: escalated threads (to the
-assignee and every admin/manager) and guests waiting longer than
-`ALERT_WAIT_MINUTES` (to the assignee, or the managers if unassigned).
+assignee and every admin/manager), guests waiting longer than
+`ALERT_WAIT_MINUTES` (to the assignee, or the managers if unassigned), and
+tasks past their due time.
+
+**Suggest reply** in the reply box (`/api/ai/draft`, `src/lib/ai/draft.ts`)
+drafts an answer from the property details, the saved replies marked
+"approved for AI" and the booking. Missing facts are left as [placeholders].
+It only fills the box: staff edit it and press Send.
 
 ## Checks
 

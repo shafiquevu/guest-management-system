@@ -2,26 +2,50 @@
   "name": "Guest Inbox – sync, AI triage and staff alerts",
   "nodes": [
     {
-      "parameters": { "rule": { "interval": [{ "field": "minutes", "minutesInterval": 5 }] } },
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
       "id": "a1",
       "name": "Every 5 minutes",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [0, 0]
+      "position": [
+        0,
+        0
+      ]
     },
     {
       "parameters": {
         "method": "POST",
         "url": "https://guest-management-system.vercel.app/api/sync/beds24",
         "sendHeaders": true,
-        "headerParameters": { "parameters": [{ "name": "x-sync-secret", "value": "PASTE_SYNC_SECRET_HERE" }] },
-        "options": { "timeout": 60000 }
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-sync-secret",
+              "value": "PASTE_SYNC_SECRET_HERE"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
       },
       "id": "a2",
       "name": "Sync Beds24",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [220, 0],
+      "position": [
+        220,
+        0
+      ],
       "onError": "continueRegularOutput"
     },
     {
@@ -29,25 +53,44 @@
         "method": "POST",
         "url": "https://guest-management-system.vercel.app/api/jobs/alerts",
         "sendHeaders": true,
-        "headerParameters": { "parameters": [{ "name": "x-sync-secret", "value": "PASTE_SYNC_SECRET_HERE" }] },
-        "options": { "timeout": 60000 }
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-sync-secret",
+              "value": "PASTE_SYNC_SECRET_HERE"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
       },
       "id": "a3",
       "name": "AI triage + alerts",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [440, 0]
+      "position": [
+        440,
+        0
+      ]
     },
     {
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
           "conditions": [
             {
               "id": "c1",
               "leftValue": "={{ $json.count }}",
               "rightValue": 0,
-              "operator": { "type": "number", "operation": "gt" }
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
             }
           ],
           "combinator": "and"
@@ -58,7 +101,10 @@
       "name": "Any alerts?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [660, 0]
+      "position": [
+        660,
+        0
+      ]
     },
     {
       "parameters": {
@@ -66,20 +112,153 @@
         "subject": "={{ $json.email.subject }}",
         "emailType": "html",
         "message": "={{ $json.email.html }}",
-        "options": { "appendAttribution": false }
+        "options": {
+          "appendAttribution": false
+        }
       },
       "id": "a5",
       "name": "Email staff",
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
-      "position": [880, -100]
+      "position": [
+        880,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "name": "Every morning 8:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://guest-management-system.vercel.app/api/jobs/daily-summary",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-sync-secret",
+              "value": "PASTE_SYNC_SECRET_HERE"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "name": "Daily summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email.to }}",
+        "subject": "={{ $json.email.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.email.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email managers",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        440,
+        260
+      ]
     }
   ],
   "connections": {
-    "Every 5 minutes": { "main": [[{ "node": "Sync Beds24", "type": "main", "index": 0 }]] },
-    "Sync Beds24": { "main": [[{ "node": "AI triage + alerts", "type": "main", "index": 0 }]] },
-    "AI triage + alerts": { "main": [[{ "node": "Any alerts?", "type": "main", "index": 0 }]] },
-    "Any alerts?": { "main": [[{ "node": "Email staff", "type": "main", "index": 0 }], []] }
+    "Every 5 minutes": {
+      "main": [
+        [
+          {
+            "node": "Sync Beds24",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sync Beds24": {
+      "main": [
+        [
+          {
+            "node": "AI triage + alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI triage + alerts": {
+      "main": [
+        [
+          {
+            "node": "Any alerts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any alerts?": {
+      "main": [
+        [
+          {
+            "node": "Email staff",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Every morning 8:00": {
+      "main": [
+        [
+          {
+            "node": "Daily summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily summary": {
+      "main": [
+        [
+          {
+            "node": "Email managers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
-  "settings": { "executionOrder": "v1" }
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/London"
+  }
 }

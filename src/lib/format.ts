@@ -225,3 +225,30 @@ export function messagePreview(body: string | null | undefined): string {
   if (text) return images.length ? `📷 ${text}` : text;
   return images.length ? (images.length > 1 ? `📷 ${images.length} photos` : "📷 Photo") : "";
 }
+
+export type ReplyMsg = { conversation_id: string; direction: string; received_at: string | null; sent_at: string | null; created_at: string };
+
+/** Average minutes from a guest message to the next staff reply, per conversation. */
+export function averageReplyMinutes(rows: ReplyMsg[]): number | null {
+  const at = (m: ReplyMsg) => m.received_at || m.sent_at || m.created_at;
+  const byConv = new Map<string, ReplyMsg[]>();
+  for (const m of rows) {
+    const list = byConv.get(m.conversation_id) ?? [];
+    list.push(m);
+    byConv.set(m.conversation_id, list);
+  }
+  const gaps: number[] = [];
+  for (const list of byConv.values()) {
+    list.sort((a, b) => at(a).localeCompare(at(b)));
+    let waitingSince: string | null = null;
+    for (const m of list) {
+      if (m.direction === "inbound" && !waitingSince) waitingSince = at(m);
+      if (m.direction === "outbound" && waitingSince) {
+        gaps.push((Date.parse(at(m)) - Date.parse(waitingSince)) / 60000);
+        waitingSince = null;
+      }
+    }
+  }
+  if (!gaps.length) return null;
+  return gaps.reduce((a, b) => a + b, 0) / gaps.length;
+}

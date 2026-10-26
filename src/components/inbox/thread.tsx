@@ -43,6 +43,8 @@ export function Thread({
   const [sendError, setSendError] = useState<string | null>(null);
   const [saved, setSaved] = useState<SavedReply[]>([]);
   const [showSaved, setShowSaved] = useState(false);
+  const [drafting, setDrafting] = useState(false);
+  const [aiNote, setAiNote] = useState<{ missing: string[]; managerNeeded: boolean } | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
 
@@ -118,10 +120,29 @@ export function Thread({
       json: { conversationId: conversation.id, body: text, clientKey: crypto.randomUUID() },
     });
     setSending(false);
-    if (res.ok) setDraft("");
-    else setSendError(res.data?.error ?? "The reply could not be sent.");
+    if (res.ok) {
+      setDraft("");
+      setAiNote(null);
+    } else setSendError(res.data?.error ?? "The reply could not be sent.");
     load();
     onChanged();
+  }
+
+  // The AI fills the reply box only; staff edit it and press Send themselves.
+  async function suggest() {
+    if (drafting) return;
+    if (draft.trim() && !window.confirm("Replace what you've written with an AI suggestion?")) return;
+    setDrafting(true);
+    setSendError(null);
+    const res = await api("/api/ai/draft", { json: { conversationId: conversation.id } });
+    setDrafting(false);
+    if (!res.ok) {
+      setSendError(res.data?.error ?? "Could not draft a reply.");
+      return;
+    }
+    setDraft(res.data.reply);
+    setAiNote({ missing: res.data.missing ?? [], managerNeeded: Boolean(res.data.manager_needed) });
+    box.current?.focus();
   }
 
   async function retry(messageId: string) {
@@ -319,6 +340,13 @@ export function Thread({
               <AlertCircle className="h-4 w-4" /> {sendError}
             </p>
           )}
+          {aiNote && draft && (
+            <div className="mb-2 rounded-lg bg-indigo-50 px-3 py-2 text-xs text-indigo-900">
+              <span className="font-semibold">AI suggestion. Read it before sending.</span>
+              {aiNote.missing.length > 0 && <> Fill in: {aiNote.missing.join(", ")}.</>}
+              {aiNote.managerNeeded && <> The guest is asking for something a manager must approve.</>}
+            </div>
+          )}
           <div className="rounded-xl bg-white shadow-sm ring-1 ring-slate-200 focus-within:ring-2 focus-within:ring-indigo-500">
             <textarea
               ref={box}
@@ -341,6 +369,9 @@ export function Thread({
                 aria-expanded={showSaved}
               >
                 <BookOpen className="h-4 w-4" /> Saved replies
+              </button>
+              <button type="button" onClick={suggest} disabled={drafting} className={btn.ghost}>
+                <Sparkles className="h-4 w-4" /> {drafting ? "Drafting…" : "Suggest reply"}
               </button>
               {showSaved && (
                 <div className="scroll-thin absolute bottom-11 left-2 z-10 max-h-72 w-96 overflow-y-auto rounded-xl bg-white p-1 shadow-lg ring-1 ring-slate-200">

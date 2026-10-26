@@ -5,7 +5,7 @@ import { useCallback, useState, type ReactNode } from "react";
 import { AlarmClock, ArrowRight, BedDouble, Clock3, Inbox as InboxIcon, ListTodo, LogIn, LogOut, MessageCircleWarning } from "lucide-react";
 import { useApp } from "@/components/app-shell";
 import { Avatar, Card, ChannelBadge, cx, EmptyState, PageHeader } from "@/components/ui";
-import { awaitingReply, CHANNEL_LABEL, dateTime, minutesLabel, timeAgo } from "@/lib/format";
+import { averageReplyMinutes, awaitingReply, CHANNEL_LABEL, dateTime, minutesLabel, timeAgo, type ReplyMsg } from "@/lib/format";
 import { useLoader } from "@/lib/use-loader";
 
 type Conv = {
@@ -21,7 +21,6 @@ type Conv = {
 };
 type Task = { id: string; title: string; status: string; priority: string; due_at: string | null; assigned_to: string | null };
 type Res = { id: string; check_in: string | null; check_out: string | null; status: string | null; guest: { full_name: string } | null; property: { name: string } | null };
-type Msg = { conversation_id: string; direction: string; received_at: string | null; sent_at: string | null; created_at: string };
 
 const ACTIVE = ["open", "pending", "escalated"];
 
@@ -62,7 +61,7 @@ export function Dashboard() {
     setTasks((t.data ?? []) as Task[]);
     setStays((r.data ?? []) as unknown as Res[]);
     setStaff((s.data ?? []) as { id: string; full_name: string }[]);
-    setReplyMinutes(averageReplyMinutes((m.data ?? []) as Msg[]));
+    setReplyMinutes(averageReplyMinutes((m.data ?? []) as ReplyMsg[]));
     setLoading(false);
   }, [supabase]);
   useLoader(load);
@@ -192,30 +191,6 @@ export function Dashboard() {
 }
 
 /** Average minutes between a guest message and the next host reply, over the period. */
-function averageReplyMinutes(rows: Msg[]): number | null {
-  const at = (m: Msg) => m.received_at || m.sent_at || m.created_at;
-  const byConv = new Map<string, Msg[]>();
-  for (const m of rows) {
-    const list = byConv.get(m.conversation_id) ?? [];
-    list.push(m);
-    byConv.set(m.conversation_id, list);
-  }
-  const gaps: number[] = [];
-  for (const list of byConv.values()) {
-    list.sort((a, b) => at(a).localeCompare(at(b)));
-    let waitingSince: string | null = null;
-    for (const m of list) {
-      if (m.direction === "inbound" && !waitingSince) waitingSince = at(m);
-      if (m.direction === "outbound" && waitingSince) {
-        gaps.push((Date.parse(at(m)) - Date.parse(waitingSince)) / 60000);
-        waitingSince = null;
-      }
-    }
-  }
-  if (!gaps.length) return null;
-  return gaps.reduce((a, b) => a + b, 0) / gaps.length;
-}
-
 function tally<T>(rows: T[], key: (r: T) => string): [string, number][] {
   const m = new Map<string, number>();
   for (const r of rows) m.set(key(r), (m.get(key(r)) ?? 0) + 1);
