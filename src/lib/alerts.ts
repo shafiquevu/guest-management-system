@@ -1,5 +1,6 @@
 import "server-only";
 
+import { button, card, emailLayout, esc, pill, sectionTitle } from "@/lib/email-layout";
 import { organizationId, supabaseAdmin } from "@/lib/supabase/admin";
 
 /**
@@ -166,7 +167,7 @@ export function alertEmail(alerts: Alert[]) {
   const waiting = alerts.filter((a) => a.kind === "waiting");
   const tasks = alerts.filter((a) => a.kind === "task_overdue");
   const subject = escalated.length
-    ? `URGENT: ${escalated.length} guest issue${escalated.length > 1 ? "s" : ""} need a manager`
+    ? `URGENT: ${escalated.length} guest issue${escalated.length > 1 ? "s need" : " needs"} a manager`
     : waiting.length
       ? `${waiting.length} guest${waiting.length > 1 ? "s" : ""} waiting for a reply`
       : `${tasks.length} task${tasks.length > 1 ? "s" : ""} overdue`;
@@ -195,27 +196,52 @@ export function alertEmail(alerts: Alert[]) {
     .filter(Boolean)
     .join("\n\n――――――――\n\n");
 
-  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const card = (a: Alert) => `
-    <div style="border:1px solid #e2e8f0;border-left:4px solid ${a.kind === "escalated" ? "#dc2626" : "#f59e0b"};border-radius:8px;padding:12px 14px;margin:0 0 10px">
-      <div style="font-weight:600;color:#0f172a">${esc(a.guest)} <span style="font-weight:400;color:#64748b">· ${esc(a.property)} · ${esc(a.channel)}</span></div>
-      ${a.reason ? `<div style="color:#b91c1c;margin-top:4px">${esc(a.reason)}</div>` : ""}
-      ${a.summary ? `<div style="color:#334155;margin-top:4px">${esc(a.summary)}</div>` : ""}
-      ${a.waitingMinutes ? `<div style="color:#64748b;font-size:13px;margin-top:4px">Waiting ${a.waitingMinutes < 60 ? `${a.waitingMinutes} min` : `${Math.round(a.waitingMinutes / 60)} h`}</div>` : ""}
-      <a href="${esc(a.link)}" style="display:inline-block;margin-top:8px;color:#4f46e5;font-weight:600">Open conversation →</a>
-    </div>`;
-  const taskCard = (a: Alert) => `
-    <div style="border:1px solid #e2e8f0;border-left:4px solid #6366f1;border-radius:8px;padding:12px 14px;margin:0 0 10px">
-      <div style="font-weight:600;color:#0f172a">${esc(a.summary ?? "Task")}</div>
-      ${a.property || a.guest ? `<div style="color:#64748b;margin-top:4px">${esc([a.property, a.guest].filter(Boolean).join(" · "))}</div>` : ""}
-      <div style="color:#b91c1c;font-size:13px;margin-top:4px">Overdue by ${late(a.waitingMinutes)}</div>
-      <a href="${esc(a.link)}" style="display:inline-block;margin-top:8px;color:#4f46e5;font-weight:600">Open tasks →</a>
-    </div>`;
-  const html = `<div style="font-family:system-ui,sans-serif;max-width:560px">
-    ${escalated.length ? `<h3 style="color:#b91c1c">Needs a manager</h3>${escalated.map(card).join("")}` : ""}
-    ${waiting.length ? `<h3 style="color:#b45309">Waiting for a reply</h3>${waiting.map(card).join("")}` : ""}
-    ${tasks.length ? `<h3 style="color:#4338ca">Overdue tasks</h3>${tasks.map(taskCard).join("")}` : ""}
-  </div>`;
+  const waitLabel = (m: number) => (m < 60 ? `${m} min` : `${Math.round(m / 60)} h`);
+  const PRIORITY_PILL: Record<string, [string, string, string]> = {
+    urgent: ["Urgent", "#fee2e2", "#b91c1c"],
+    high: ["High priority", "#fef3c7", "#92400e"],
+  };
+  const guestCard = (a: Alert) => {
+    const urgent = a.kind === "escalated";
+    const p = a.priority ? PRIORITY_PILL[a.priority] : undefined;
+    return card(
+      `<div style="font-size:16px;font-weight:700;color:#0f172a">${esc(a.guest)}</div>
+      <div style="margin-top:2px;font-size:13px;color:#64748b">${esc([a.property, a.channel].filter(Boolean).join(" · "))}</div>
+      <div style="margin-top:10px">
+        ${a.waitingMinutes ? pill(`Waiting ${waitLabel(a.waitingMinutes)}`, "#fef3c7", "#92400e") : ""}
+        ${p ? pill(p[0], p[1], p[2]) : ""}
+      </div>
+      ${a.reason ? `<div style="margin-top:10px;font-size:14px;font-weight:600;color:#b91c1c">${esc(a.reason)}</div>` : ""}
+      ${a.summary ? `<div style="margin-top:8px;font-size:14px;line-height:1.5;color:#334155">${esc(a.summary)}</div>` : ""}
+      ${button(a.link, "Open conversation", urgent ? "#dc2626" : "#4f46e5")}`,
+      urgent ? "#dc2626" : "#f59e0b",
+    );
+  };
+  const taskCard = (a: Alert) =>
+    card(
+      `<div style="font-size:15px;font-weight:700;color:#0f172a">${esc(a.summary ?? "Task")}</div>
+      ${a.property || a.guest ? `<div style="margin-top:2px;font-size:13px;color:#64748b">${esc([a.property, a.guest].filter(Boolean).join(" · "))}</div>` : ""}
+      <div style="margin-top:10px">${pill(`Overdue by ${late(a.waitingMinutes)}`, "#fee2e2", "#b91c1c")}</div>
+      ${button(a.link, "Open tasks", "#4338ca")}`,
+      "#6366f1",
+    );
+
+  const html = emailLayout({
+    heading: subject,
+    subheading: "These need someone from the team.",
+    preheader: alerts
+      .slice(0, 3)
+      .map((a) => (a.kind === "task_overdue" ? a.summary : `${a.guest}: ${a.summary ?? "waiting"}`))
+      .join(" · "),
+    accent: escalated.length ? "#b91c1c" : "#4f46e5",
+    body: [
+      escalated.length ? sectionTitle("Needs a manager", "#b91c1c", escalated.length) + escalated.map(guestCard).join("") : "",
+      waiting.length ? sectionTitle("Waiting for a reply", "#b45309", waiting.length) + waiting.map(guestCard).join("") : "",
+      tasks.length ? sectionTitle("Overdue tasks", "#4338ca", tasks.length) + tasks.map(taskCard).join("") : "",
+    ].join(""),
+    footer:
+      "Each alert is sent once. Guests waiting go to the person assigned (or the managers if nobody is); urgent issues go to all managers.",
+  });
 
   const to = [...new Set(alerts.flatMap((a) => a.to))];
   return { to: to.join(","), subject, text, html };

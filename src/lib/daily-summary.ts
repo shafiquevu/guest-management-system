@@ -1,6 +1,7 @@
 import "server-only";
 
 import { averageReplyMinutes, awaitingReply, CHANNEL_LABEL, minutesLabel, type ReplyMsg } from "@/lib/format";
+import { button, emailLayout, esc, sectionTitle } from "@/lib/email-layout";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 /**
@@ -112,16 +113,62 @@ export async function dailySummary() {
     .filter(Boolean)
     .join("\n\n");
 
-  const esc = (v: string) => v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const html = `<div style="font-family:system-ui,sans-serif;max-width:560px;color:#0f172a">
-    ${sections
-      .map(
-        ([h, lines]) => `<h3 style="margin:18px 0 6px">${esc(h)}</h3>
-      <div style="color:#334155;line-height:1.6">${(lines.length ? lines : ["None."]).map(esc).join("<br>")}</div>`,
-      )
-      .join("")}
-    ${appUrl ? `<p style="margin-top:18px"><a href="${esc(appUrl)}/dashboard" style="color:#4f46e5;font-weight:600">Open the dashboard →</a></p>` : ""}
-  </div>`;
+  const tile = (value: string | number, label: string, color = "#0f172a") =>
+    `<td width="25%" style="padding:4px"><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 8px;text-align:center">
+      <div style="font-size:22px;font-weight:700;color:${color}">${esc(String(value))}</div>
+      <div style="margin-top:2px;font-size:11px;line-height:1.3;color:#64748b">${esc(label)}</div>
+    </div></td>`;
+  const row = (main: string, meta?: string, tag?: string) =>
+    `<tr><td style="padding:9px 0;border-bottom:1px solid #f1f5f9">
+      <div style="font-size:14px;font-weight:600;color:#0f172a">${esc(main)}${tag ? ` <span style="font-weight:500;color:#b45309">· ${esc(tag)}</span>` : ""}</div>
+      ${meta ? `<div style="font-size:13px;color:#64748b">${esc(meta)}</div>` : ""}
+    </td></tr>`;
+  const list = (rows: string[], empty: string) =>
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:18px">${
+      rows.length ? rows.join("") : `<tr><td style="padding:6px 0;font-size:14px;color:#94a3b8">${esc(empty)}</td></tr>`
+    }</table>`;
+  const incidentCount = (incidents ?? []).length;
+
+  const html = emailLayout({
+    heading: "Good morning. Here's the inbox.",
+    subheading: new Date(now).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "Europe/London" }),
+    preheader: subject,
+    body: `
+      ${sectionTitle("Last 24 hours")}
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 -4px 18px"><tr>
+        ${tile(received, "Guest messages")}
+        ${tile(sent, "Replies sent")}
+        ${tile(minutesLabel(reply), "Average reply time")}
+        ${tile(incidentCount, "Escalations", incidentCount ? "#b91c1c" : "#0f172a")}
+      </tr></table>
+
+      ${sectionTitle("Waiting for a reply", "#b45309", waiting.length)}
+      ${list(
+        waiting.slice(0, 10).map((c) => row(c.guest?.full_name ?? "Guest", [c.property?.name, CHANNEL_LABEL[c.channel] ?? c.channel].filter(Boolean).join(" · "), `waiting ${waited(c)}`)),
+        "Nobody is waiting. Every guest has an answer.",
+      )}
+
+      ${sectionTitle("Needs attention", "#b91c1c")}
+      ${list(
+        [
+          ...(escalated ? [row(`${escalated} escalated conversation${escalated === 1 ? "" : "s"} still open`)] : []),
+          ...overdue.slice(0, 8).map((t) => row(t.title, t.property?.name ?? undefined, "overdue")),
+        ],
+        `Nothing overdue. ${open.length} open task${open.length === 1 ? "" : "s"}.`,
+      )}
+
+      ${sectionTitle(`Today: ${arrivals.length} arriving, ${departures.length} leaving`, "#4338ca")}
+      ${list(
+        [
+          ...arrivals.map((x) => row(x.guest?.full_name ?? "Guest", x.property?.name ?? undefined, "arrives")),
+          ...departures.map((x) => row(x.guest?.full_name ?? "Guest", x.property?.name ?? undefined, "leaves")),
+        ].slice(0, 20),
+        "No arrivals or departures today.",
+      )}
+
+      ${appUrl ? `<div style="margin:4px 0 12px">${button(`${appUrl}/dashboard`, "Open the dashboard")}</div>` : ""}`,
+    footer: "Sent every morning at 8:00 to admins and managers.",
+  });
 
   return { to: to.join(","), subject, text, html };
 }
