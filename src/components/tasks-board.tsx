@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { AlarmClock, Plus, User } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { AlarmClock, Plus, User, X } from "lucide-react";
 import { useApp } from "@/components/app-shell";
 import { Avatar, btn, Chip, cx, field, PageHeader, Tabs } from "@/components/ui";
 import { dateTime } from "@/lib/format";
@@ -41,7 +41,10 @@ export function TasksBoard() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [staff, setStaff] = useState<{ id: string; full_name: string; avatar_url: string | null }[]>([]);
   const [view, setView] = useState<"all" | "mine">("all");
+  const [adding, setAdding] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [title, setTitle] = useState("");
+  const [details, setDetails] = useState("");
   const [priority, setPriority] = useState("normal");
   const [due, setDue] = useState("");
   const [assignee, setAssignee] = useState("");
@@ -79,21 +82,33 @@ export function TasksBoard() {
     };
   }, [supabase, load]);
 
+  function closeForm() {
+    setAdding(false);
+    setTitle("");
+    setDetails("");
+    setPriority("normal");
+    setDue("");
+    setAssignee("");
+    setError(null);
+  }
+
   async function create(e: FormEvent) {
     e.preventDefault();
     if (!title.trim()) return;
+    setSaving(true);
     const { error } = await supabase.from("tasks").insert({
       organization_id: profile.organization_id,
       title: title.trim(),
+      description: details.trim() || null,
       category: "general",
       priority,
       due_at: due ? new Date(due).toISOString() : null,
       assigned_to: assignee || null,
       created_by: profile.id,
     });
+    setSaving(false);
     if (error) return setError(error.message);
-    setTitle("");
-    setDue("");
+    closeForm();
     load();
   }
 
@@ -130,32 +145,64 @@ export function TasksBoard() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="space-y-4 border-b border-slate-200 bg-white px-6 py-5">
+      <div className="border-b border-slate-200 bg-white px-6 py-5">
         <PageHeader
           title="Tasks"
           subtitle="Guest requests and jobs for the team. Tasks created from a conversation link back to the guest."
           actions={
-            <div className="w-56">
-              <Tabs value={view} onChange={setView} items={[{ key: "all", label: "Everyone" }, { key: "mine", label: "Mine" }]} />
-            </div>
+            <>
+              <div className="w-56">
+                <Tabs value={view} onChange={setView} items={[{ key: "all", label: "Everyone" }, { key: "mine", label: "Mine" }]} />
+              </div>
+              {canWrite && (
+                <button onClick={() => setAdding(true)} className={btn.primary}>
+                  <Plus className="h-4 w-4" /> New task
+                </button>
+              )}
+            </>
           }
         />
-        {canWrite && (
-          <form onSubmit={create} className="flex flex-wrap gap-2">
-            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Add a task…" className={cx(field, "min-w-64 flex-1")} aria-label="New task" />
-            <select value={priority} onChange={(e) => setPriority(e.target.value)} className={cx(field, "w-32 capitalize")} aria-label="Priority">
-              {["low", "normal", "high", "urgent"].map((p) => <option key={p} value={p}>{p}</option>)}
-            </select>
-            <input type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} className={cx(field, "w-52")} aria-label="Due" />
-            <select value={assignee} onChange={(e) => setAssignee(e.target.value)} className={cx(field, "w-44")} aria-label="Assign to">
-              <option value="">Unassigned</option>
-              {staff.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}
-            </select>
-            <button className={btn.primary}><Plus className="h-4 w-4" /> Add</button>
-          </form>
-        )}
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && !adding && <p className="mt-3 text-sm text-red-600">{error}</p>}
       </div>
+
+      {adding && (
+        <NewTaskDialog onClose={closeForm}>
+          <form onSubmit={create} className="space-y-4">
+            <label className="block">
+              <span className="text-sm font-medium text-slate-700">Task</span>
+              <input autoFocus required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Replace bathroom bulb, Flat 3" className={cx(field, "mt-1")} />
+            </label>
+            <label className="block">
+              <span className="text-sm font-medium text-slate-700">Details <span className="font-normal text-slate-400">(optional)</span></span>
+              <textarea value={details} onChange={(e) => setDetails(e.target.value)} rows={3} className={cx(field, "mt-1 resize-y")} />
+            </label>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block">
+                <span className="text-sm font-medium text-slate-700">Priority</span>
+                <select value={priority} onChange={(e) => setPriority(e.target.value)} className={cx(field, "mt-1 capitalize")}>
+                  {["low", "normal", "high", "urgent"].map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </label>
+              <label className="block">
+                <span className="text-sm font-medium text-slate-700">Assign to</span>
+                <select value={assignee} onChange={(e) => setAssignee(e.target.value)} className={cx(field, "mt-1")}>
+                  <option value="">Unassigned</option>
+                  {staff.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+                </select>
+              </label>
+            </div>
+            <label className="block">
+              <span className="text-sm font-medium text-slate-700">Due <span className="font-normal text-slate-400">(optional)</span></span>
+              <input type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} className={cx(field, "mt-1")} />
+            </label>
+            {error && <p className="text-sm text-red-600">{error}</p>}
+            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <button type="button" onClick={closeForm} className={btn.secondary}>Cancel</button>
+              <button disabled={saving || !title.trim()} className={btn.primary}>{saving ? "Adding…" : "Add task"}</button>
+            </div>
+          </form>
+        </NewTaskDialog>
+      )}
 
       <div className="scroll-thin grid min-h-0 flex-1 grid-cols-4 gap-4 overflow-auto p-6 max-lg:grid-cols-2">
         {COLUMNS.map((col) => {
@@ -206,6 +253,34 @@ export function TasksBoard() {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+/** A centred pop-up over the board. Closes on Escape, the X, or a click outside. */
+function NewTaskDialog({ onClose, children }: { onClose: () => void; children: ReactNode }) {
+  const panel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4 pt-[10vh]"
+      onMouseDown={(e) => {
+        if (!panel.current?.contains(e.target as Node)) onClose();
+      }}
+    >
+      <div ref={panel} role="dialog" aria-modal="true" aria-labelledby="new-task-title" className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl ring-1 ring-slate-200">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 id="new-task-title" className="text-base font-semibold text-slate-900">New task</h2>
+          <button type="button" onClick={onClose} className={btn.ghost} aria-label="Close"><X className="h-4 w-4" /></button>
+        </div>
+        {children}
       </div>
     </div>
   );
