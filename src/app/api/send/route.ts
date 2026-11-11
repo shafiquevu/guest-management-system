@@ -1,5 +1,6 @@
 import { canSeeConversation, errorResponse, requireStaff } from "@/lib/auth/staff";
 import { beds24, isConfigured } from "@/lib/beds24/client";
+import { sendGmailReply } from "@/lib/gmail/send";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { refreshConversation } from "@/lib/sync/beds24";
 
@@ -17,6 +18,8 @@ type MultiPostResult = { success?: boolean; errors?: { message?: string }[] }[];
  * click or a retried request cannot send twice. Then it goes to Beds24, and
  * the row becomes `sent` or `failed` with the reason. The sync later swaps
  * local:<clientKey> for Beds24's own message id by matching the text.
+ * Email conversations go out through the connected Gmail mailbox instead,
+ * and take Gmail's message id straight away.
  */
 export async function POST(request: Request) {
   try {
@@ -58,17 +61,21 @@ export async function POST(request: Request) {
     if (!conversation || !(await canSeeConversation(staff, conversation))) {
       return Response.json({ error: "Conversation not found." }, { status: 404 });
     }
-    if (!["airbnb", "booking_com", "beds24"].includes(conversation.channel)) {
+    const viaGmail = conversation.channel === "gmail";
+    if (!viaGmail && !["airbnb", "booking_com", "beds24"].includes(conversation.channel)) {
       return Response.json({ error: "Replying on this channel is not connected yet." }, { status: 400 });
     }
 
-    const { data: reservation } = await db
-      .from("reservations")
-      .select("external_id")
-      .eq("id", conversation.reservation_id)
-      .single();
-    const bookingId = Number(reservation?.external_id);
-    if (!bookingId) return Response.json({ error: "This conversation has no booking to reply to." }, { status: 400 });
+    let bookingId = 0;
+    if (!viaGmail) {
+      const { data: reservation } = await db
+        .from("reservations")
+        .select("external_id")
+        .eq("id", conversation.reservation_id)
+        .single();
+      bookingId = Number(reservation?.external_id);
+      if (!bookingId) return Response.json({ error: "This conversation has no booking to reply to." }, { status: 400 });
+    }
 
     if (!row) {
       const { data: inserted } = await db
@@ -105,7 +112,7 @@ export async function POST(request: Request) {
       await db.from("messages").update({ status: "pending", provider_error: null }).eq("id", row.id);
     }
 
-    if (!isConfigured()) {
+    if (!viaGmail && !isConfigured()) {
       await db
         .from("messages")
         .update({ status: "failed", provider_error: "Beds24 is not connected." })
@@ -116,18 +123,30 @@ export async function POST(request: Request) {
     let status: "sent" | "failed" = "failed";
     let providerError: string | null = null;
     let providerResponse: unknown = null;
-    try {
-      const { data } = await beds24<MultiPostResult>("POST", "/bookings/messages", {
-        body: [{ bookingId, message: text }],
-      });
-      providerResponse = data;
-      if (Array.isArray(data) && data[0]?.success) {
+    let externalId: string | null = null;
+    if (viaGmail) {
+      try {
+        const sent = await sendGmailReply(conversation.id, text);
+        providerResponse = sent;
+        externalId = `gmail:${sent.id}`; // the next sync recognises it and doesn't import it twice
         status = "sent";
-      } else {
-        providerError = data?.[0]?.errors?.map((e) => e.message).filter(Boolean).join("; ") || "Beds24 did not accept the message.";
+      } catch (e) {
+        providerError = e instanceof Error ? e.message : String(e);
       }
-    } catch (e) {
-      providerError = e instanceof Error ? e.message : String(e);
+    } else {
+      try {
+        const { data } = await beds24<MultiPostResult>("POST", "/bookings/messages", {
+          body: [{ bookingId, message: text }],
+        });
+        providerResponse = data;
+        if (Array.isArray(data) && data[0]?.success) {
+          status = "sent";
+        } else {
+          providerError = data?.[0]?.errors?.map((e) => e.message).filter(Boolean).join("; ") || "Beds24 did not accept the message.";
+        }
+      } catch (e) {
+        providerError = e instanceof Error ? e.message : String(e);
+      }
     }
 
     const now = new Date().toISOString();
@@ -138,6 +157,7 @@ export async function POST(request: Request) {
         provider_error: providerError,
         provider_response: providerResponse,
         sent_at: status === "sent" ? now : null,
+        ...(externalId ? { external_message_id: externalId } : {}),
       })
       .eq("id", row.id);
 

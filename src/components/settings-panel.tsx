@@ -1,14 +1,32 @@
 "use client";
 
-import { useCallback, useRef, useState, type FormEvent } from "react";
-import { Camera, KeyRound, RefreshCw, UserPlus } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { Camera, KeyRound, Mail, RefreshCw, UserPlus } from "lucide-react";
 import { useApp, type Role } from "@/components/app-shell";
 import { Avatar, btn, Card, Chip, cx, field, PageHeader } from "@/components/ui";
 import { dateTime } from "@/lib/format";
 import { useLoader } from "@/lib/use-loader";
 
 type StaffRow = { id: string; full_name: string; email: string; role: Role; active: boolean; avatar_url: string | null };
-type Connection = { id: string; channel: string; display_name: string; active: boolean; last_sync_at: string | null; last_error: string | null };
+type Connection = {
+  id: string;
+  channel: string;
+  display_name: string;
+  active: boolean;
+  mailbox_email: string | null;
+  last_sync_at: string | null;
+  last_error: string | null;
+};
+
+/** What Google's round trip came back with (/settings?gmail=…). */
+const GMAIL_RESULT: Record<string, { ok: boolean; text: string }> = {
+  connected: { ok: true, text: "Gmail connected. Guest emails will appear in the inbox within 5 minutes, or press Sync now." },
+  cancelled: { ok: false, text: "Gmail was not connected: access was cancelled on Google's page." },
+  expired: { ok: false, text: "That Gmail sign-in link expired. Press Connect Gmail again." },
+  "not-allowed": { ok: false, text: "Only an admin can connect Gmail." },
+  "no-refresh-token": { ok: false, text: "Google didn't grant lasting access. Remove this app at myaccount.google.com/permissions, then connect again." },
+  failed: { ok: false, text: "Gmail could not be connected. Check the Google Cloud settings and try again." },
+};
 
 const ROLES: { key: Role; label: string; help: string }[] = [
   { key: "admin", label: "Admin", help: "Everything, including staff and settings" },
@@ -35,7 +53,7 @@ export function SettingsPanel() {
       supabase.from("profiles").select("id, full_name, email, role, active, avatar_url").order("full_name"),
       supabase.from("properties").select("id, name").order("name"),
       supabase.from("property_staff").select("profile_id, property_id"),
-      supabase.from("channel_connections").select("id, channel, display_name, active, last_sync_at, last_error"),
+      supabase.from("channel_connections").select("id, channel, display_name, active, mailbox_email, last_sync_at, last_error"),
     ]);
     setStaff((s ?? []) as StaffRow[]);
     setProperties((p ?? []) as { id: string; name: string }[]);
@@ -45,6 +63,28 @@ export function SettingsPanel() {
     setConnections((c ?? []) as Connection[]);
   }, [supabase]);
   useLoader(load);
+
+  // Back from Google: show the result once, then tidy the address bar.
+  useEffect(() => {
+    const result = new URLSearchParams(window.location.search).get("gmail");
+    if (!result) return;
+    window.history.replaceState(null, "", window.location.pathname);
+    void Promise.resolve().then(() => setNotice(GMAIL_RESULT[result] ?? GMAIL_RESULT.failed));
+  }, []);
+
+  async function connectGmail() {
+    setNotice(null);
+    const res = await api("/api/gmail/connect", { json: {} });
+    if (!res.ok || !res.data.url) return setNotice({ ok: false, text: res.data.error ?? "Could not start the Gmail connection." });
+    window.location.href = res.data.url;
+  }
+
+  async function disconnectGmail() {
+    if (!window.confirm("Disconnect Gmail? Emails already in the inbox stay; new ones stop arriving.")) return;
+    const res = await api("/api/gmail/connect", { method: "DELETE" });
+    setNotice(res.ok ? { ok: true, text: "Gmail disconnected." } : { ok: false, text: res.data.error ?? "Could not disconnect." });
+    load();
+  }
 
   async function sync(maxAgeDays: number) {
     setSyncing(true);
@@ -92,6 +132,9 @@ export function SettingsPanel() {
     setNewPassword("");
   }
 
+  const beds24Connections = connections.filter((c) => c.channel === "beds24");
+  const gmail = connections.find((c) => c.channel === "gmail" && c.active) ?? null;
+
   return (
     <div className="scroll-thin h-full overflow-y-auto">
       <div className="mx-auto max-w-5xl space-y-6 p-6">
@@ -113,8 +156,8 @@ export function SettingsPanel() {
               </div>
             }
           >
-            {connections.length === 0 && <p className="text-sm text-slate-500">Nothing synced yet. Press “Sync now”.</p>}
-            {connections.map((c) => (
+            {beds24Connections.length === 0 && <p className="text-sm text-slate-500">Nothing synced yet. Press “Sync now”.</p>}
+            {beds24Connections.map((c) => (
               <div key={c.id} className="flex items-center gap-4">
                 <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-900 text-sm font-bold text-white">B24</span>
                 <div className="flex-1">
@@ -127,13 +170,29 @@ export function SettingsPanel() {
                 </Chip>
               </div>
             ))}
-            <div className="mt-4 grid gap-2 border-t border-slate-100 pt-4 sm:grid-cols-2">
-              {["WhatsApp", "Gmail"].map((n) => (
-                <div key={n} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
-                  <span className="text-slate-700">{n}</span>
-                  <Chip className="bg-slate-100 text-slate-500 ring-slate-200">Not connected yet</Chip>
-                </div>
-              ))}
+            <div className="mt-4 flex items-center gap-4 border-t border-slate-100 pt-4">
+              <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500 text-white"><Mail className="h-5 w-5" /></span>
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-slate-900">
+                  Gmail <span className="font-normal text-slate-500">· {gmail ? gmail.mailbox_email : "guest emails"}</span>
+                </p>
+                <p className="text-xs text-slate-500">
+                  {gmail ? `Last sync ${gmail.last_sync_at ? dateTime(gmail.last_sync_at) : "not yet"}` : "Sign in with the team mailbox to bring guest emails into the inbox."}
+                </p>
+                {gmail?.last_error && <p className="mt-1 text-xs text-red-600">{gmail.last_error}</p>}
+              </div>
+              {gmail && (
+                <Chip className={gmail.last_error ? "bg-red-50 text-red-700 ring-red-200" : "bg-emerald-50 text-emerald-700 ring-emerald-200"}>
+                  {gmail.last_error ? "Needs attention" : "Connected"}
+                </Chip>
+              )}
+              {isAdmin && (gmail
+                ? <button onClick={disconnectGmail} className={btn.secondary}>Disconnect</button>
+                : <button onClick={connectGmail} className={btn.primary}>Connect Gmail</button>)}
+            </div>
+            <div className="mt-4 flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
+              <span className="text-slate-700">WhatsApp</span>
+              <Chip className="bg-slate-100 text-slate-500 ring-slate-200">Not connected yet</Chip>
             </div>
           </Card>
         )}

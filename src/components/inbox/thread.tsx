@@ -25,7 +25,7 @@ type Message = {
 type SavedReply = { id: string; question: string; answer: string; category: string; property_id: string | null };
 
 const when = (m: Message) => m.received_at || m.sent_at || m.created_at;
-const REPLYABLE = ["airbnb", "booking_com", "beds24"];
+const REPLYABLE = ["airbnb", "booking_com", "beds24", "gmail"];
 
 export function Thread({
   conversation,
