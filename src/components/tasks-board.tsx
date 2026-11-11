@@ -204,16 +204,18 @@ export function TasksBoard() {
         </NewTaskDialog>
       )}
 
-      <div className="scroll-thin grid min-h-0 flex-1 grid-cols-4 gap-4 overflow-auto p-6 max-lg:grid-cols-2">
+      {/* Like a pipeline board: the page stays put, each column scrolls on its own,
+          and narrow screens scroll sideways between columns. */}
+      <div className="scroll-thin flex min-h-0 flex-1 gap-4 overflow-x-auto p-6">
         {COLUMNS.map((col) => {
           const items = tasks.filter((t) => col.key.includes(t.status));
           return (
-            <div key={col.label} className="flex min-h-0 flex-col rounded-xl bg-slate-100/70 p-2">
-              <div className="flex items-center justify-between px-2 py-1.5">
+            <div key={col.label} className="flex min-h-0 min-w-72 flex-1 flex-col rounded-xl bg-slate-100/70 p-2">
+              <div className="flex shrink-0 items-center justify-between px-2 py-1.5">
                 <h2 className="text-sm font-semibold text-slate-700">{col.label}</h2>
                 <span className="rounded-full bg-white px-2 text-xs font-medium text-slate-600 shadow-sm">{items.length}</span>
               </div>
-              <div className="space-y-2">
+              <div className="scroll-thin min-h-0 flex-1 space-y-2 overflow-y-auto pr-0.5">
                 {items.length === 0 && <p className="px-2 py-4 text-center text-xs text-slate-400">Nothing here</p>}
                 {items.map((t) => (
                   <article key={t.id} className="rounded-lg bg-white p-3 shadow-sm ring-1 ring-slate-200">
