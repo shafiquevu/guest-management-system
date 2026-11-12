@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Inbox as InboxIcon, MessageSquareText, Search, Timer } from "lucide-react";
 import { useApp } from "@/components/app-shell";
+import { brandOf } from "@/components/channel-logo";
 import { Avatar, Chip, cx, EmptyState, field, GuestAvatar, Tabs } from "@/components/ui";
 import { awaitingReply, CATEGORY_LABEL, CHANNEL_LABEL, messagePreview, PRIORITY_CHIP, STAY_STYLE, stayStatus, timeAgo } from "@/lib/format";
 import { useLoader } from "@/lib/use-loader";
@@ -293,7 +294,8 @@ export function Inbox() {
                     isSelected ? "bg-indigo-50/70" : "hover:bg-slate-50",
                   )}
                 >
-                  {isSelected && <span className="absolute inset-y-0 left-0 w-0.5 bg-indigo-600" aria-hidden />}
+                  {/* the platform's colour down the left edge */}
+                  <span className={cx("absolute inset-y-0 left-0 w-1", brandOf(c.channel).bar)} aria-hidden />
                   <GuestAvatar name={c.guest?.full_name ?? c.subject} channel={c.channel} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline gap-2">
@@ -304,7 +306,11 @@ export function Inbox() {
                         {timeAgo(c.last_message_at)}
                       </span>
                     </div>
-                    <p className="truncate text-xs text-slate-500">{c.property?.name ?? "No property linked"}</p>
+                    <p className="truncate text-xs text-slate-500">
+                      <span className={cx("font-semibold", brandOf(c.channel).text)}>{CHANNEL_LABEL[c.channel] ?? c.channel}</span>
+                      {" · "}
+                      {c.property?.name ?? "No property linked"}
+                    </p>
                     <div className="mt-1 flex items-center gap-2">
                       <p className={cx("min-w-0 flex-1 truncate text-sm", unread ? "text-slate-900" : "text-slate-500")}>
                         {preview ? `${preview.outbound ? `${replier(preview.sentBy)}: ` : ""}${messagePreview(preview.body)}` : "No messages yet"}

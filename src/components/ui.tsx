@@ -2,7 +2,8 @@
 
 import { useState, type ReactNode } from "react";
 import { Check, ChevronDown, Copy } from "lucide-react";
-import { avatarTint, CHANNEL_LABEL, CHANNEL_STYLE, initials } from "@/lib/format";
+import { brandOf, ChannelLogo } from "@/components/channel-logo";
+import { avatarTint, CHANNEL_LABEL, initials } from "@/lib/format";
 
 export function cx(...classes: (string | false | null | undefined)[]): string {
   return classes.filter(Boolean).join(" ");
@@ -47,31 +48,23 @@ export function Avatar({
 
 /** Channel: a coloured mark plus its name, so identity is never colour alone. */
 export function ChannelBadge({ channel, compact = false }: { channel: string; compact?: boolean }) {
-  const style = CHANNEL_STYLE[channel] ?? CHANNEL_STYLE.beds24;
+  const brand = brandOf(channel);
   const label = CHANNEL_LABEL[channel] ?? channel;
   return (
-    <span className={cx("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium ring-1 ring-inset", style.chip)}>
-      <span className={cx("h-1.5 w-1.5 rounded-full", style.dot)} aria-hidden />
-      {compact ? null : label}
-      {compact && <span className="sr-only">{label}</span>}
+    <span className={cx("inline-flex items-center gap-1.5 rounded-full py-0.5 pr-2 pl-0.5 text-[11px] font-semibold", brand.tint, brand.text)}>
+      <ChannelLogo channel={channel} size="sm" />
+      {compact ? <span className="sr-only">{label}</span> : label}
     </span>
   );
 }
 
 /** A small avatar with the channel's mark in the corner. */
 export function GuestAvatar({ name, channel }: { name: string | null | undefined; channel: string }) {
-  const style = CHANNEL_STYLE[channel] ?? CHANNEL_STYLE.beds24;
   return (
     <span className="relative inline-flex">
       <Avatar name={name} />
-      <span
-        className={cx(
-          "absolute -right-0.5 -bottom-0.5 flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold text-white ring-2 ring-white",
-          style.dot,
-        )}
-        title={CHANNEL_LABEL[channel] ?? channel}
-      >
-        {style.letter}
+      <span className="absolute -right-1 -bottom-1 rounded-full ring-2 ring-white">
+        <ChannelLogo channel={channel} size="md" />
       </span>
     </span>
   );
