@@ -44,6 +44,7 @@ export function Thread({
 }) {
   const { supabase, api, canWrite, profile } = useApp();
   const [messages, setMessages] = useState<Message[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [photos, setPhotos] = useState<Record<string, string[]>>({});
   const [files, setFiles] = useState<Record<string, StoredFile[]>>({});
   const [draft, setDraft] = useState("");
@@ -77,6 +78,8 @@ export function Thread({
   const bottom = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
 
+  // When the current signed photo links were issued (they last an hour).
+  const linkedAt = useRef(0);
   const load = useCallback(async () => {
     const { data } = await supabase
       .from("messages")
@@ -84,16 +87,28 @@ export function Thread({
       .eq("conversation_id", conversation.id)
       .order("created_at");
     const rows = ((data ?? []) as Message[]).sort((a, b) => when(a).localeCompare(when(b)));
-    setMessages(rows);
     // Stored copies of photos (the original Airbnb links expire after an hour).
-    // WhatsApp photos, voice notes and files are stored copies too.
+    // WhatsApp photos, voice notes and files are stored copies too. Fetched
+    // before the messages are shown, so the thread appears once, complete.
     if (conversation.channel === "whatsapp" || rows.some((m) => parseMessage(m.body).images.length)) {
       const res = await api("/api/attachments", { json: { conversationId: conversation.id } });
       if (res.ok) {
-        setPhotos(res.data.byMessage ?? {});
-        setFiles(res.data.files ?? {});
+        // Every call signs fresh links; keep the ones already on screen so the
+        // photos don't reload (blink) on each live update, until they near expiry.
+        const fresh = Date.now() - linkedAt.current > 45 * 60_000;
+        if (fresh) linkedAt.current = Date.now();
+        const keep = <T,>(prev: Record<string, T[]>, next: Record<string, T[]>) => {
+          if (fresh) return next;
+          const out: Record<string, T[]> = {};
+          for (const [id, list] of Object.entries(next)) out[id] = prev[id]?.length === list.length ? prev[id] : list;
+          return out;
+        };
+        setPhotos((prev) => keep(prev, res.data.byMessage ?? {}));
+        setFiles((prev) => keep(prev, res.data.files ?? {}));
       }
     }
+    setMessages(rows);
+    setLoaded(true);
   }, [supabase, api, conversation.id, conversation.channel]);
   useLoader(load);
 
@@ -301,7 +316,14 @@ export function Thread({
     return map;
   }, [messages]);
   const canQuote = (m: Message) => canWrite && conversation.channel === "whatsapp" && !!m.external_message_id?.startsWith("whatsapp:");
-  const who = (m: Message) => (m.direction === "inbound" ? guestName : replyLabel(m));
+  const who = (m: Message) =>
+    m.direction === "inbound"
+      ? guestName
+      : m.sent_by
+        ? m.sent_by === profile.id
+          ? "You"
+          : (author(m)?.full_name ?? m.sender_name ?? "Team")
+        : (m.sender_name ?? "Team");
 
   return (
     <>
@@ -378,7 +400,7 @@ export function Thread({
 
       {/* messages */}
       <div className="scroll-thin relative min-h-0 flex-1 overflow-y-auto px-5 py-4">
-        {messages.length === 0 && <p className="text-center text-sm text-slate-500">No messages yet.</p>}
+        {loaded && messages.length === 0 && <p className="text-center text-sm text-slate-500">No messages yet.</p>}
         {rows.map(({ m, newDay, grouped }) => (
           <Fragment key={m.id}>
             {newDay && (
