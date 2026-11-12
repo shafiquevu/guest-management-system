@@ -44,7 +44,7 @@ const SELECT = `id, channel, status, subject, unread_count, last_message_at, las
 const ACTIVE = ["open", "pending", "escalated"];
 
 export function Inbox() {
-  const { supabase, profile } = useApp();
+  const { supabase, api, profile } = useApp();
   const [conversations, setConversations] = useState<ConversationRow[]>([]);
   const [previews, setPreviews] = useState<Record<string, { body: string; outbound: boolean; sentBy: string | null }>>({});
   const [loading, setLoading] = useState(true);
@@ -140,6 +140,22 @@ export function Inbox() {
       supabase.removeChannel(sub);
     };
   }, [supabase, load]);
+
+  // Guest emails: Gmail doesn't push, so check every 30 seconds while the inbox
+  // is open and visible (the server skips it if anyone checked in the last 20s).
+  // New emails arrive through the realtime subscription above.
+  useEffect(() => {
+    const check = () => {
+      if (document.visibilityState === "visible") void api("/api/sync/gmail", { json: {} });
+    };
+    check();
+    const every = setInterval(check, 30_000);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      clearInterval(every);
+      document.removeEventListener("visibilitychange", check);
+    };
+  }, [api]);
 
   const inTab = useCallback((c: ConversationRow, key: TabKey) => {
     if (key === "all") return true;

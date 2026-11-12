@@ -1,6 +1,7 @@
 import { triagePending } from "@/lib/ai/triage";
 import { alertEmail, collectAlerts } from "@/lib/alerts";
 import { takeCalendarReport, watchCalendar } from "@/lib/calendar/watch";
+import { ensureGmailWatch } from "@/lib/gmail/push";
 import { secretMatches } from "@/lib/secrets";
 
 export const maxDuration = 60;
@@ -29,9 +30,11 @@ export async function POST(request: Request) {
   const alerts = await collectAlerts();
   // A calendar problem must never stop guest alerts.
   const calendar = await watchCalendar().catch((e) => ({ ran: false as const, reason: e instanceof Error ? e.message : String(e) }));
+  // Instant guest emails: renew Gmail's 7-day push watch once a day (a no-op otherwise).
+  const gmailPush = await ensureGmailWatch().catch((e) => ({ ran: false, reason: e instanceof Error ? e.message : String(e) }));
 
   if (alerts.length) {
-    return Response.json({ count: alerts.length, triage, alerts, calendar, email: alertEmail(alerts) });
+    return Response.json({ count: alerts.length, triage, alerts, calendar, gmailPush, email: alertEmail(alerts) });
   }
   const calendarEmail = await takeCalendarReport().catch(() => null);
   return Response.json({
@@ -39,6 +42,7 @@ export async function POST(request: Request) {
     triage,
     alerts,
     calendar,
+    gmailPush,
     email: calendarEmail,
   });
 }

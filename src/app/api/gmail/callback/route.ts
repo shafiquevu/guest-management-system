@@ -1,4 +1,5 @@
 import { encrypt, exchangeCode, gmail, readState } from "@/lib/gmail/client";
+import { ensureGmailWatch } from "@/lib/gmail/push";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 /**
@@ -41,6 +42,7 @@ export async function GET(request: Request) {
       { onConflict: "organization_id,channel,display_name" },
     );
     if (error) throw new Error(error.message);
+    await ensureGmailWatch(true).catch(() => null); // instant emails, if push is set up
     return back("connected");
   } catch (e) {
     console.error("gmail connect", e);
