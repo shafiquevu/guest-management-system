@@ -230,6 +230,7 @@ export function Thread({
     const i = gallery.findIndex((g) => g.src === src);
     if (i >= 0) setViewer(i);
   };
+  const hasPhotos = (m: Message) => messageParts(m.body, photos[m.id], files[m.id]).images.length > 0;
 
   return (
     <>
@@ -330,10 +331,11 @@ export function Thread({
                 <div className={cx("max-w-[72%]", m.direction === "outbound" && "items-end")}>
                   <div
                     className={cx(
-                      "rounded-2xl px-3.5 py-2 text-sm leading-relaxed shadow-sm",
+                      "rounded-2xl text-sm leading-relaxed shadow-sm",
+                      hasPhotos(m) ? "w-72 max-w-full overflow-hidden" : "px-3.5 py-2",
                       m.direction === "outbound"
                         ? cx("bg-indigo-600 text-white", m.status === "failed" && "bg-red-600")
-                        : "bg-white text-slate-900 ring-1 ring-slate-200",
+                        : cx("bg-white text-slate-900", !hasPhotos(m) && "ring-1 ring-slate-200"),
                     )}
                   >
                     <MessageBody body={m.body} stored={photos[m.id]} files={files[m.id]} onOpen={openPhoto} />
@@ -493,16 +495,22 @@ function MessageBody({
   onOpen?: (src: string) => void;
 }) {
   const { text, images } = messageParts(body, stored, files);
-  return (
-    <>
-      {text && <p className="whitespace-pre-wrap wrap-break-word">{text}</p>}
-      {images.length > 0 && (
-        <div className={cx("flex flex-wrap gap-1.5", text && "mt-2")}>
+  if (images.length) {
+    // WhatsApp style: the photo fills the bubble, the caption sits underneath.
+    return (
+      <>
+        <div className={cx("grid gap-0.5", images.length > 1 && "grid-cols-2")}>
           {images.map((img) => (
             <Photo key={img.src} image={img} onOpen={onOpen} />
           ))}
         </div>
-      )}
+        {text && <p className="px-3 py-2 whitespace-pre-wrap wrap-break-word">{text}</p>}
+      </>
+    );
+  }
+  return (
+    <>
+      {text && <p className="whitespace-pre-wrap wrap-break-word">{text}</p>}
       {files?.map((f) => (
         <div key={f.url} className={cx(text || images.length ? "mt-2" : "")}>
           {f.type.startsWith("audio/") ? (
@@ -525,7 +533,7 @@ function Photo({ image, onOpen }: { image: MessageImage; onOpen?: (src: string) 
   if (broken) {
     // Airbnb photo links are signed and expire after a while.
     return (
-      <a href={image.href} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg bg-black/10 px-2.5 py-1.5 text-xs underline">
+      <a href={image.href} target="_blank" rel="noopener noreferrer" className="m-2 inline-flex items-center gap-1.5 rounded-lg bg-black/10 px-2.5 py-1.5 text-xs underline">
         <ImageOff className="h-3.5 w-3.5" /> Photo expired (view it in Airbnb)
       </a>
     );
@@ -540,7 +548,7 @@ function Photo({ image, onOpen }: { image: MessageImage; onOpen?: (src: string) 
         e.preventDefault();
         onOpen(image.src);
       }}
-      className="block cursor-zoom-in overflow-hidden rounded-lg bg-black/5"
+      className="block cursor-zoom-in bg-black/5"
     >
       {/* eslint-disable-next-line @next/next/no-img-element -- signed third-party URLs; next/image would need every host whitelisted */}
       <img
@@ -549,7 +557,7 @@ function Photo({ image, onOpen }: { image: MessageImage; onOpen?: (src: string) 
         loading="lazy"
         referrerPolicy="no-referrer"
         onError={() => setBroken(true)}
-        className="max-h-64 max-w-full object-cover"
+        className="block max-h-80 w-full object-cover"
       />
     </a>
   );
