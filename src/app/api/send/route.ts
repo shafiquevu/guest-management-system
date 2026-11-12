@@ -18,6 +18,7 @@ type MultiPostResult = { success?: boolean; errors?: { message?: string }[] }[];
  *       { ..., attachment: { path, name, type, size } }
  *                                            -- WhatsApp only: a file already uploaded
  *                                               via /api/attachments/upload; body is the caption
+ *       { ..., replyToMessageId }            -- WhatsApp only: quote one of the thread's messages
  *       { retryMessageId }                   -- try a failed reply again
  *
  * The reply is stored first as `pending` under local:<clientKey>, so a double
@@ -51,7 +52,7 @@ export async function POST(request: Request) {
     }
 
     // A retried attachment keeps its file and caption in raw_payload.
-    const stored = (row?.raw_payload ?? null) as { attachment?: Attachment; caption?: string } | null;
+    const stored = (row?.raw_payload ?? null) as { attachment?: Attachment; caption?: string; reply_to?: string } | null;
     const attachment: Attachment | null = stored?.attachment
       ?? (input?.attachment?.path
         ? { path: String(input.attachment.path), name: String(input.attachment.name ?? "file"), type: String(input.attachment.type ?? ""), size: Number(input.attachment.size) || 0 }
@@ -94,6 +95,20 @@ export async function POST(request: Request) {
       }
     }
     const kind = attachment ? mediaKind(attachment.type) : null;
+
+    // Quoting a message: WhatsApp needs that message's own id (wamid), so only
+    // messages that came from or went through WhatsApp can be replied to.
+    let replyTo: string | null = stored?.reply_to ?? null;
+    if (!row && input?.replyToMessageId && viaWhatsApp) {
+      const { data: quoted } = await db
+        .from("messages")
+        .select("external_message_id")
+        .eq("id", String(input.replyToMessageId))
+        .eq("conversation_id", conversation.id)
+        .maybeSingle();
+      const ext = String(quoted?.external_message_id ?? "");
+      if (ext.startsWith("whatsapp:")) replyTo = ext.slice("whatsapp:".length);
+    }
     const fileName = attachment ? safeFileName(attachment.name) : "";
 
     let waNumber = "";
@@ -128,7 +143,9 @@ export async function POST(request: Request) {
             sender_name: staff.fullName,
             sent_by: staff.id,
             body: attachment && kind ? attachmentBody(kind, fileName, text) : text,
-            ...(attachment ? { raw_payload: { attachment, caption: text } } : {}),
+            ...(attachment || replyTo
+              ? { raw_payload: { ...(attachment ? { attachment, caption: text } : {}), ...(replyTo ? { reply_to: replyTo } : {}) } }
+              : {}),
           },
           { onConflict: "organization_id,channel,external_message_id", ignoreDuplicates: true },
         )
@@ -196,9 +213,9 @@ export async function POST(request: Request) {
         if (attachment && kind) {
           const { data: link, error: linkError } = await db.storage.from(BUCKET).createSignedUrl(attachment.path, 600);
           if (linkError || !link) throw new Error(`The file could not be read: ${linkError?.message ?? "not found"}`);
-          sent = await sendWhatsAppMedia(waNumber, kind, link.signedUrl, text, fileName);
+          sent = await sendWhatsAppMedia(waNumber, kind, link.signedUrl, text, fileName, replyTo ?? undefined);
         } else {
-          sent = await sendWhatsAppText(waNumber, text);
+          sent = await sendWhatsAppText(waNumber, text, replyTo ?? undefined);
         }
         providerResponse = sent.raw;
         externalId = `whatsapp:${sent.id}`; // delivery receipts arrive under this id

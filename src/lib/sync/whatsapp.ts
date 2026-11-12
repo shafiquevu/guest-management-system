@@ -4,7 +4,7 @@ import { BUCKET, ensureBucket } from "@/lib/attachments";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { refreshConversation } from "@/lib/sync/beds24";
 import { downloadMedia } from "@/lib/whatsapp/client";
-import type { WaEvent, WaMessage, WaStatus } from "@/lib/whatsapp/parse";
+import type { WaEvent, WaMessage, WaReaction, WaStatus } from "@/lib/whatsapp/parse";
 
 /**
  * WhatsApp webhook events -> Supabase.
@@ -19,7 +19,7 @@ import type { WaEvent, WaMessage, WaStatus } from "@/lib/whatsapp/parse";
  * resolved conversation.
  */
 
-export type WaReport = { messagesAdded: number; statusesApplied: number; conversationsTouched: number; ignored?: string };
+export type WaReport = { messagesAdded: number; statusesApplied: number; reactionsApplied: number; conversationsTouched: number; ignored?: string };
 
 type Connection = { id: string; organization_id: string; external_phone_number: string | null };
 
@@ -36,12 +36,12 @@ export async function whatsappConnection(): Promise<Connection | null> {
 }
 
 export async function ingestWhatsApp(events: WaEvent[]): Promise<WaReport> {
-  const report: WaReport = { messagesAdded: 0, statusesApplied: 0, conversationsTouched: 0 };
+  const report: WaReport = { messagesAdded: 0, statusesApplied: 0, reactionsApplied: 0, conversationsTouched: 0 };
   if (!events.length) return report;
   const conn = await whatsappConnection();
   if (!conn) return { ...report, ignored: "WhatsApp is not connected in Settings" };
 
-  const messages = events.filter((e): e is WaMessage => e.kind !== "status");
+  const messages = events.filter((e): e is WaMessage => e.kind === "message" || e.kind === "echo");
   const byGuest = new Map<string, WaMessage[]>();
   for (const m of messages) (byGuest.get(m.guest) ?? byGuest.set(m.guest, []).get(m.guest)!).push(m);
   for (const [guest, list] of byGuest) {
@@ -51,6 +51,11 @@ export async function ingestWhatsApp(events: WaEvent[]): Promise<WaReport> {
 
   for (const s of events.filter((e): e is WaStatus => e.kind === "status")) {
     if (await applyStatus(conn.organization_id, s)) report.statusesApplied++;
+  }
+
+  // After the messages, so a reaction to a message in the same delivery finds it.
+  for (const r of events.filter((e): e is WaReaction => e.kind === "reaction")) {
+    if (await applyReaction(conn.organization_id, r)) report.reactionsApplied++;
   }
 
   const business = messages.find((m) => m.businessNumber)?.businessNumber;
@@ -124,7 +129,13 @@ async function saveMessages(conn: Connection, guest: string, list: WaMessage[]):
       recipient_address: ours ? `+${m.guest}` : m.businessNumber ? `+${m.businessNumber}` : null,
       body: m.text || "(empty message)",
       content_type: "text",
-      raw_payload: { id: m.id, type: m.type, kind: m.kind, ...(m.media ? { media: m.media } : {}) },
+      raw_payload: {
+        id: m.id,
+        type: m.type,
+        kind: m.kind,
+        ...(m.media ? { media: m.media } : {}),
+        ...(m.replyTo ? { reply_to: m.replyTo } : {}),
+      },
       received_at: ours ? null : m.at,
       sent_at: ours ? m.at : null,
     };
@@ -257,4 +268,27 @@ async function saveMedia(orgId: string, messageId: string, media: NonNullable<Wa
   } catch (e) {
     console.error("whatsapp media", media.id, e instanceof Error ? e.message : e);
   }
+}
+
+/**
+ * A reaction from the guest (or from the team on the phone app) is shown on
+ * the message it reacts to, not as a message of its own. Kept in
+ * raw_payload.reactions as { guest: "👍", team: "❤️" }; an empty emoji removes it.
+ */
+export async function applyReaction(orgId: string, r: Pick<WaReaction, "target" | "emoji" | "by">): Promise<boolean> {
+  const db = supabaseAdmin();
+  const { data: msg } = await db
+    .from("messages")
+    .select("id, raw_payload")
+    .eq("organization_id", orgId)
+    .eq("channel", "whatsapp")
+    .eq("external_message_id", `whatsapp:${r.target}`)
+    .maybeSingle();
+  if (!msg) return false;
+  const raw = (msg.raw_payload ?? {}) as Record<string, unknown>;
+  const reactions = { ...((raw.reactions ?? {}) as Record<string, string>) };
+  if (r.emoji) reactions[r.by] = r.emoji;
+  else delete reactions[r.by];
+  await db.from("messages").update({ raw_payload: { ...raw, reactions } }).eq("id", msg.id);
+  return true;
 }

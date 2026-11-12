@@ -38,12 +38,13 @@ async function d360<T>(method: string, path: string, body?: unknown): Promise<T>
   return data as T;
 }
 
-/** Send a text to a guest. Returns WhatsApp's message id (wamid…). */
-export async function sendWhatsAppText(to: string, text: string): Promise<{ id: string; raw: unknown }> {
+/** Send a text to a guest; `replyTo` (a wamid) shows it as a reply to that message. Returns WhatsApp's message id. */
+export async function sendWhatsAppText(to: string, text: string, replyTo?: string): Promise<{ id: string; raw: unknown }> {
   const data = await d360<{ messages?: { id: string }[] }>("POST", "/messages", {
     messaging_product: "whatsapp",
     recipient_type: "individual",
     to,
+    ...(replyTo ? { context: { message_id: replyTo } } : {}),
     type: "text",
     text: { body: text, preview_url: false },
   });
@@ -82,6 +83,7 @@ export async function sendWhatsAppMedia(
   link: string,
   caption: string,
   fileName: string,
+  replyTo?: string,
 ): Promise<{ id: string; raw: unknown }> {
   const media: Record<string, string> = { link };
   if (caption && kind !== "audio") media.caption = caption;
@@ -90,6 +92,7 @@ export async function sendWhatsAppMedia(
     messaging_product: "whatsapp",
     recipient_type: "individual",
     to,
+    ...(replyTo ? { context: { message_id: replyTo } } : {}),
     type: kind,
     [kind]: media,
   });
@@ -97,6 +100,17 @@ export async function sendWhatsAppMedia(
   if (!id) throw new WhatsAppError("WhatsApp accepted the request but returned no message id.");
   if (caption && kind === "audio") await sendWhatsAppText(to, caption).catch(() => null);
   return { id, raw: data };
+}
+
+/** React to a message with an emoji; an empty emoji removes our reaction. */
+export async function sendWhatsAppReaction(to: string, messageId: string, emoji: string): Promise<void> {
+  await d360("POST", "/messages", {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to,
+    type: "reaction",
+    reaction: { message_id: messageId, emoji },
+  });
 }
 
 export function webhookUrl(origin: string): string {

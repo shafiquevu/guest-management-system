@@ -25,6 +25,17 @@ export type WaMessage = {
   businessNumber: string;
   /** A photo or file to download through 360dialog (WhatsApp media ids expire after ~30 days). */
   media?: { id: string; mime: string; filename?: string };
+  /** The WhatsApp id (wamid) of the message this one replies to. */
+  replyTo?: string;
+};
+
+/** A reaction (emoji) on a message; an empty emoji removes it. */
+export type WaReaction = {
+  kind: "reaction";
+  target: string;
+  emoji: string;
+  by: "guest" | "team";
+  guest: string;
 };
 
 export type WaStatus = {
@@ -36,7 +47,7 @@ export type WaStatus = {
   error: string | null;
 };
 
-export type WaEvent = WaMessage | WaStatus;
+export type WaEvent = WaMessage | WaStatus | WaReaction;
 
 const MEDIA_LABEL: Record<string, string> = {
   image: "📷 Photo",
@@ -109,6 +120,10 @@ export function parseWebhook(body: any): WaEvent[] {
         for (const m of value.messages ?? []) {
           if (!m?.id || !m.from) continue;
           const guest = digits(m.from);
+          if (m.type === "reaction" && m.reaction?.message_id) {
+            events.push({ kind: "reaction", target: String(m.reaction.message_id), emoji: String(m.reaction.emoji ?? ""), by: "guest", guest });
+            continue;
+          }
           events.push({
             kind: "message",
             id: String(m.id),
@@ -119,6 +134,7 @@ export function parseWebhook(body: any): WaEvent[] {
             type: String(m.type ?? ""),
             businessNumber: business,
             ...(messageMedia(m) ? { media: messageMedia(m) } : {}),
+            ...(m.context?.id ? { replyTo: String(m.context.id) } : {}),
           });
         }
         for (const s of value.statuses ?? []) {
@@ -136,6 +152,10 @@ export function parseWebhook(body: any): WaEvent[] {
         for (const m of value.message_echoes ?? []) {
           if (!m?.id || !m.to) continue;
           const guest = digits(m.to);
+          if (m.type === "reaction" && m.reaction?.message_id) {
+            events.push({ kind: "reaction", target: String(m.reaction.message_id), emoji: String(m.reaction.emoji ?? ""), by: "team", guest });
+            continue;
+          }
           events.push({
             kind: "echo",
             id: String(m.id),
@@ -146,6 +166,7 @@ export function parseWebhook(body: any): WaEvent[] {
             type: String(m.type ?? ""),
             businessNumber: business || digits(m.from),
             ...(messageMedia(m) ? { media: messageMedia(m) } : {}),
+            ...(m.context?.id ? { replyTo: String(m.context.id) } : {}),
           });
         }
       }

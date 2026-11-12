@@ -1,10 +1,10 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { AlertCircle, BookOpen, Check, CheckCheck, CheckCircle2, ChevronLeft, ChevronRight, Clock, Download, ExternalLink, FileText, ImageOff, Paperclip, RotateCcw, Send, ShieldAlert, Sparkles, X } from "lucide-react";
+import { AlertCircle, BookOpen, Check, CheckCheck, CheckCircle2, ChevronLeft, ChevronRight, Clock, Download, ExternalLink, FileText, ImageOff, Paperclip, Reply, RotateCcw, Send, ShieldAlert, SmilePlus, Sparkles, X } from "lucide-react";
 import { useApp } from "@/components/app-shell";
 import { Avatar, btn, ChannelBadge, cx } from "@/components/ui";
-import { CATEGORY_LABEL, CHANNEL_LABEL, clock, dayLabel, parseMessage, type MessageImage } from "@/lib/format";
+import { CATEGORY_LABEL, CHANNEL_LABEL, clock, dayLabel, messagePreview, parseMessage, type MessageImage } from "@/lib/format";
 import { useLoader } from "@/lib/use-loader";
 import { ACCEPT, checkAttachment } from "@/lib/whatsapp/media";
 import type { ConversationRow, StaffOption } from "./inbox";
@@ -21,7 +21,12 @@ type Message = {
   received_at: string | null;
   sent_at: string | null;
   created_at: string;
+  external_message_id: string | null;
+  raw_payload: { reply_to?: string; reactions?: Record<string, string> } | null;
 };
+
+/** WhatsApp's quick reactions. */
+const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
 type SavedReply = { id: string; question: string; answer: string; category: string; property_id: string | null };
 
@@ -46,6 +51,8 @@ export function Thread({
 
   const picker = useRef<HTMLInputElement>(null);
   const canAttach = conversation.channel === "whatsapp";
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [reactFor, setReactFor] = useState<string | null>(null);
 
   // A thumbnail for a chosen photo; freed when the file changes.
   const preview = useMemo(() => (file && file.type.startsWith("image/") ? URL.createObjectURL(file) : null), [file]);
@@ -73,7 +80,7 @@ export function Thread({
   const load = useCallback(async () => {
     const { data } = await supabase
       .from("messages")
-      .select("id, direction, status, body, content_type, sender_name, sent_by, provider_error, received_at, sent_at, created_at")
+      .select("id, direction, status, body, content_type, sender_name, sent_by, provider_error, received_at, sent_at, created_at, external_message_id, raw_payload")
       .eq("conversation_id", conversation.id)
       .order("created_at");
     const rows = ((data ?? []) as Message[]).sort((a, b) => when(a).localeCompare(when(b)));
@@ -164,12 +171,19 @@ export function Thread({
     }
 
     const res = await api("/api/send", {
-      json: { conversationId: conversation.id, body: text, clientKey: crypto.randomUUID(), ...(attachment ? { attachment } : {}) },
+      json: {
+        conversationId: conversation.id,
+        body: text,
+        clientKey: crypto.randomUUID(),
+        ...(attachment ? { attachment } : {}),
+        ...(replyTo ? { replyToMessageId: replyTo.id } : {}),
+      },
     });
     setSending(false);
     if (res.ok) {
       setDraft("");
       setFile(null);
+      setReplyTo(null);
       setAiNote(null);
     } else setSendError(res.data?.error ?? "The reply could not be sent.");
     load();
@@ -191,6 +205,13 @@ export function Thread({
     setDraft(res.data.reply);
     setAiNote({ missing: res.data.missing ?? [], managerNeeded: Boolean(res.data.manager_needed) });
     box.current?.focus();
+  }
+
+  async function react(messageId: string, emoji: string) {
+    setReactFor(null);
+    const res = await api("/api/whatsapp/react", { json: { messageId, emoji } });
+    if (!res.ok) setSendError(res.data?.error ?? "The reaction could not be sent.");
+    load();
   }
 
   async function retry(messageId: string) {
@@ -273,6 +294,14 @@ export function Thread({
     if (i >= 0) setViewer(i);
   };
   const hasPhotos = (m: Message) => messageParts(m.body, photos[m.id], files[m.id]).images.length > 0;
+  // WhatsApp replies point at a message by its WhatsApp id.
+  const byWamid = useMemo(() => {
+    const map = new Map<string, Message>();
+    for (const m of messages) if (m.external_message_id?.startsWith("whatsapp:")) map.set(m.external_message_id.slice(9), m);
+    return map;
+  }, [messages]);
+  const canQuote = (m: Message) => canWrite && conversation.channel === "whatsapp" && !!m.external_message_id?.startsWith("whatsapp:");
+  const who = (m: Message) => (m.direction === "inbound" ? guestName : replyLabel(m));
 
   return (
     <>
@@ -370,7 +399,50 @@ export function Thread({
                     <Avatar name={guestName} size="sm" />
                   </span>
                 )}
-                <div className={cx("max-w-[72%]", m.direction === "outbound" && "items-end")}>
+                <div className={cx("group relative max-w-[72%]", m.direction === "outbound" && "items-end")}>
+                  {canQuote(m) && (
+                    <div
+                      className={cx(
+                        "absolute top-1 z-10 flex gap-0.5 rounded-full bg-white p-0.5 opacity-0 shadow ring-1 ring-slate-200 transition group-hover:opacity-100 focus-within:opacity-100",
+                        m.direction === "outbound" ? "right-full mr-1.5" : "left-full ml-1.5",
+                        reactFor === m.id && "opacity-100",
+                      )}
+                    >
+                      <button
+                        type="button"
+                        title="Reply"
+                        className="rounded-full p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                        onClick={() => {
+                          setReplyTo(m);
+                          box.current?.focus();
+                        }}
+                      >
+                        <Reply className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        title="React"
+                        className="rounded-full p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                        onClick={() => setReactFor((id) => (id === m.id ? null : m.id))}
+                      >
+                        <SmilePlus className="h-4 w-4" />
+                      </button>
+                      {reactFor === m.id && (
+                        <div className={cx("absolute bottom-full mb-1 flex gap-0.5 rounded-full bg-white p-1 shadow-lg ring-1 ring-slate-200", m.direction === "outbound" ? "right-0" : "left-0")}>
+                          {REACTIONS.map((e) => (
+                            <button
+                              key={e}
+                              type="button"
+                              className={cx("rounded-full px-1.5 py-0.5 text-lg leading-none hover:bg-slate-100", m.raw_payload?.reactions?.team === e && "bg-indigo-50")}
+                              onClick={() => react(m.id, m.raw_payload?.reactions?.team === e ? "" : e)}
+                            >
+                              {e}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <div
                     className={cx(
                       "rounded-2xl text-sm leading-relaxed shadow-sm",
@@ -380,8 +452,25 @@ export function Thread({
                         : cx("bg-white text-slate-900", !hasPhotos(m) && "ring-1 ring-slate-200"),
                     )}
                   >
+                    {m.raw_payload?.reply_to && (
+                      <Quote
+                        quoted={byWamid.get(m.raw_payload.reply_to) ?? null}
+                        who={(q) => who(q)}
+                        dark={m.direction === "outbound"}
+                        padded={hasPhotos(m)}
+                      />
+                    )}
                     <MessageBody body={m.body} stored={photos[m.id]} files={files[m.id]} onOpen={openPhoto} />
                   </div>
+                  {m.raw_payload?.reactions && Object.keys(m.raw_payload.reactions).length > 0 && (
+                    <div className={cx("-mt-2 flex px-2", m.direction === "outbound" ? "justify-end" : "justify-start")}>
+                      <span className="relative inline-flex gap-0.5 rounded-full bg-white px-1.5 py-0.5 text-sm shadow ring-1 ring-slate-200">
+                        {Object.entries(m.raw_payload.reactions).map(([by, e]) => (
+                          <span key={by} title={by === "team" ? "Your team" : guestName}>{e}</span>
+                        ))}
+                      </span>
+                    </div>
+                  )}
                   {!grouped || m.status === "failed" ? (
                     <div className={cx("mt-1 flex items-center gap-1 px-1 text-[11px] text-slate-400", m.direction === "outbound" && "justify-end")}>
                       {m.direction === "outbound" && <span>{replyLabel(m)} ·</span>}
@@ -437,6 +526,17 @@ export function Thread({
               choose(e.dataTransfer.files?.[0]);
             }}
           >
+            {replyTo && (
+              <div className="flex items-start gap-2 border-b border-slate-100 px-3 py-2">
+                <div className="min-w-0 flex-1 border-l-4 border-emerald-500 pl-2">
+                  <p className="text-xs font-semibold text-emerald-700">Replying to {who(replyTo)}</p>
+                  <p className="truncate text-xs text-slate-500">{messagePreview(replyTo.body)}</p>
+                </div>
+                <button type="button" onClick={() => setReplyTo(null)} className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Cancel reply">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
             {file && (
               <div className="flex items-center gap-3 border-b border-slate-100 px-3 py-2">
                 {preview ? (
@@ -785,6 +885,38 @@ function PhotoViewer({
           <div className="h-4" />
         )}
       </div>
+    </div>
+  );
+}
+
+/** The message a WhatsApp reply quotes, shown at the top of the bubble. */
+function Quote({
+  quoted,
+  who,
+  dark,
+  padded,
+}: {
+  quoted: Message | null;
+  who: (m: Message) => string;
+  dark: boolean;
+  padded: boolean;
+}) {
+  return (
+    <div
+      className={cx(
+        "mb-1.5 rounded-lg border-l-4 px-2 py-1 text-xs",
+        dark ? "border-white/70 bg-white/15 text-white/90" : "border-emerald-500 bg-slate-100 text-slate-600",
+        padded && "m-1.5 mb-0",
+      )}
+    >
+      {quoted ? (
+        <>
+          <p className={cx("font-semibold", dark ? "text-white" : "text-emerald-700")}>{who(quoted)}</p>
+          <p className="line-clamp-2 whitespace-pre-wrap">{messagePreview(quoted.body)}</p>
+        </>
+      ) : (
+        <p className="italic">A message that is not in this conversation</p>
+      )}
     </div>
   );
 }

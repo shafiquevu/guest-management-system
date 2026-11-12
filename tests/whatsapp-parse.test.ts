@@ -85,7 +85,7 @@ test("photos, voice notes and documents carry their media id for download", () =
       ],
     }),
   );
-  const media = events.map((e) => (e.kind !== "status" ? e.media : undefined));
+  const media = events.map((e) => (e.kind === "message" || e.kind === "echo" ? e.media : undefined));
   assert.deepEqual(media, [
     { id: "media1", mime: "image/jpeg" },
     { id: "media2", mime: "audio/ogg; codecs=opus" },
@@ -115,4 +115,25 @@ test("sent attachments read like received ones in the thread", () => {
   assert.equal(attachmentBody("image", "x.jpg", "the door"), "📷 Photo\nthe door");
   assert.equal(attachmentBody("document", "invoice.pdf", ""), "📎 Document (invoice.pdf)");
   assert.equal(safeFileName("../my <invoice>.pdf"), "my invoice.pdf");
+});
+
+test("replies carry the quoted message id, reactions attach to their message", () => {
+  const events = parseWebhook(
+    wrap("messages", {
+      messages: [
+        { from: "447700900222", id: "wamid.R", timestamp: "1762950000", type: "text", text: { body: "yes that one" }, context: { from: "447700900111", id: "wamid.A" } },
+        { from: "447700900222", id: "wamid.X", timestamp: "1762950001", type: "reaction", reaction: { message_id: "wamid.A", emoji: "👍" } },
+      ],
+    }),
+  );
+  assert.equal(events.length, 2);
+  assert.equal(events[0].kind === "message" && events[0].replyTo, "wamid.A");
+  assert.deepEqual(events[1], { kind: "reaction", target: "wamid.A", emoji: "👍", by: "guest", guest: "447700900222" });
+
+  const echoes = parseWebhook(
+    wrap("smb_message_echoes", {
+      message_echoes: [{ from: "447700900111", to: "447700900222", id: "wamid.Y", timestamp: "1762950002", type: "reaction", reaction: { message_id: "wamid.R", emoji: "" } }],
+    }),
+  );
+  assert.deepEqual(echoes, [{ kind: "reaction", target: "wamid.R", emoji: "", by: "team", guest: "447700900222" }]);
 });
