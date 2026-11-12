@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test --experimental-strip-types tests/map.test.ts tests/format.test.ts tests/gmail-parse.test.ts tests/calendar-diff.test.ts",
+    "test": "node --test --experimental-strip-types tests/map.test.ts tests/format.test.ts tests/gmail-parse.test.ts tests/calendar-diff.test.ts tests/whatsapp-parse.test.ts",
     "create-admin": "node scripts/create-admin.mjs"
   },
   "dependencies": {

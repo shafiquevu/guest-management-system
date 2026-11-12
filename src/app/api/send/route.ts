@@ -3,6 +3,7 @@ import { beds24, isConfigured } from "@/lib/beds24/client";
 import { sendGmailReply } from "@/lib/gmail/send";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { refreshConversation } from "@/lib/sync/beds24";
+import { sendWhatsAppText, whatsappConfigured } from "@/lib/whatsapp/client";
 
 export const maxDuration = 30;
 
@@ -19,7 +20,9 @@ type MultiPostResult = { success?: boolean; errors?: { message?: string }[] }[];
  * the row becomes `sent` or `failed` with the reason. The sync later swaps
  * local:<clientKey> for Beds24's own message id by matching the text.
  * Email conversations go out through the connected Gmail mailbox instead,
- * and take Gmail's message id straight away.
+ * and take Gmail's message id straight away. WhatsApp conversations go out
+ * through 360dialog and take WhatsApp's id (wamid), so delivery receipts and
+ * the webhook find the same row.
  */
 export async function POST(request: Request) {
   try {
@@ -62,12 +65,20 @@ export async function POST(request: Request) {
       return Response.json({ error: "Conversation not found." }, { status: 404 });
     }
     const viaGmail = conversation.channel === "gmail";
-    if (!viaGmail && !["airbnb", "booking_com", "beds24"].includes(conversation.channel)) {
+    const viaWhatsApp = conversation.channel === "whatsapp";
+    if (!viaGmail && !viaWhatsApp && !["airbnb", "booking_com", "beds24"].includes(conversation.channel)) {
       return Response.json({ error: "Replying on this channel is not connected yet." }, { status: 400 });
     }
 
+    let waNumber = "";
+    if (viaWhatsApp) {
+      const { data: thread } = await db.from("conversations").select("external_thread_id").eq("id", conversation.id).single();
+      waNumber = String(thread?.external_thread_id ?? "").replace(/^whatsapp:/, "");
+      if (!/^\d{7,15}$/.test(waNumber)) return Response.json({ error: "This chat has no WhatsApp number to reply to." }, { status: 400 });
+    }
+
     let bookingId = 0;
-    if (!viaGmail) {
+    if (!viaGmail && !viaWhatsApp) {
       const { data: reservation } = await db
         .from("reservations")
         .select("external_id")
@@ -112,7 +123,15 @@ export async function POST(request: Request) {
       await db.from("messages").update({ status: "pending", provider_error: null }).eq("id", row.id);
     }
 
-    if (!viaGmail && !isConfigured()) {
+    if (viaWhatsApp && !whatsappConfigured()) {
+      await db
+        .from("messages")
+        .update({ status: "failed", provider_error: "WhatsApp is not connected." })
+        .eq("id", row.id);
+      return Response.json({ messageId: row.id, status: "failed", error: "WhatsApp is not connected." }, { status: 503 });
+    }
+
+    if (!viaGmail && !viaWhatsApp && !isConfigured()) {
       await db
         .from("messages")
         .update({ status: "failed", provider_error: "Beds24 is not connected." })
@@ -129,6 +148,15 @@ export async function POST(request: Request) {
         const sent = await sendGmailReply(conversation.id, text);
         providerResponse = sent;
         externalId = `gmail:${sent.id}`; // the next sync recognises it and doesn't import it twice
+        status = "sent";
+      } catch (e) {
+        providerError = e instanceof Error ? e.message : String(e);
+      }
+    } else if (viaWhatsApp) {
+      try {
+        const sent = await sendWhatsAppText(waNumber, text);
+        providerResponse = sent.raw;
+        externalId = `whatsapp:${sent.id}`; // delivery receipts arrive under this id
         status = "sent";
       } catch (e) {
         providerError = e instanceof Error ? e.message : String(e);

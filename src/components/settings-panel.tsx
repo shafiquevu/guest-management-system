@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { Camera, KeyRound, Mail, RefreshCw, UserPlus } from "lucide-react";
+import { Camera, KeyRound, Mail, MessageCircle, RefreshCw, UserPlus } from "lucide-react";
 import { useApp, type Role } from "@/components/app-shell";
 import { Avatar, btn, Card, Chip, cx, field, PageHeader } from "@/components/ui";
 import { dateTime } from "@/lib/format";
@@ -14,6 +14,7 @@ type Connection = {
   display_name: string;
   active: boolean;
   mailbox_email: string | null;
+  external_phone_number: string | null;
   last_sync_at: string | null;
   last_error: string | null;
 };
@@ -53,7 +54,7 @@ export function SettingsPanel() {
       supabase.from("profiles").select("id, full_name, email, role, active, avatar_url").order("full_name"),
       supabase.from("properties").select("id, name").order("name"),
       supabase.from("property_staff").select("profile_id, property_id"),
-      supabase.from("channel_connections").select("id, channel, display_name, active, mailbox_email, last_sync_at, last_error"),
+      supabase.from("channel_connections").select("id, channel, display_name, active, mailbox_email, external_phone_number, last_sync_at, last_error"),
     ]);
     setStaff((s ?? []) as StaffRow[]);
     setProperties((p ?? []) as { id: string; name: string }[]);
@@ -83,6 +84,24 @@ export function SettingsPanel() {
     if (!window.confirm("Disconnect Gmail? Emails already in the inbox stay; new ones stop arriving.")) return;
     const res = await api("/api/gmail/connect", { method: "DELETE" });
     setNotice(res.ok ? { ok: true, text: "Gmail disconnected." } : { ok: false, text: res.data.error ?? "Could not disconnect." });
+    load();
+  }
+
+  async function connectWhatsApp() {
+    setNotice(null);
+    const res = await api("/api/whatsapp/connect", { json: {} });
+    setNotice(
+      res.ok
+        ? { ok: true, text: "WhatsApp connected. New guest messages will appear in the inbox." }
+        : { ok: false, text: res.data.error ?? "Could not connect WhatsApp." },
+    );
+    load();
+  }
+
+  async function disconnectWhatsApp() {
+    if (!window.confirm("Disconnect WhatsApp? Chats already in the inbox stay; new messages stop arriving here (the phone app keeps working).")) return;
+    const res = await api("/api/whatsapp/connect", { method: "DELETE" });
+    setNotice(res.ok ? { ok: true, text: "WhatsApp disconnected." } : { ok: false, text: res.data.error ?? "Could not disconnect." });
     load();
   }
 
@@ -134,6 +153,7 @@ export function SettingsPanel() {
 
   const beds24Connections = connections.filter((c) => c.channel === "beds24");
   const gmail = connections.find((c) => c.channel === "gmail" && c.active) ?? null;
+  const whatsapp = connections.find((c) => c.channel === "whatsapp" && c.active) ?? null;
 
   return (
     <div className="scroll-thin h-full overflow-y-auto">
@@ -190,9 +210,27 @@ export function SettingsPanel() {
                 ? <button onClick={disconnectGmail} className={btn.secondary}>Disconnect</button>
                 : <button onClick={connectGmail} className={btn.primary}>Connect Gmail</button>)}
             </div>
-            <div className="mt-4 flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
-              <span className="text-slate-700">WhatsApp</span>
-              <Chip className="bg-slate-100 text-slate-500 ring-slate-200">Not connected yet</Chip>
+            <div className="mt-4 flex items-center gap-4 border-t border-slate-100 pt-4">
+              <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-500 text-white"><MessageCircle className="h-5 w-5" /></span>
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-slate-900">
+                  WhatsApp <span className="font-normal text-slate-500">· {whatsapp?.external_phone_number ?? "guest chats"}</span>
+                </p>
+                <p className="text-xs text-slate-500">
+                  {whatsapp
+                    ? `Last message ${whatsapp.last_sync_at ? dateTime(whatsapp.last_sync_at) : "not yet"}`
+                    : "Bring the business WhatsApp number into the inbox. The phone app keeps working as before."}
+                </p>
+                {whatsapp?.last_error && <p className="mt-1 text-xs text-red-600">{whatsapp.last_error}</p>}
+              </div>
+              {whatsapp && (
+                <Chip className={whatsapp.last_error ? "bg-red-50 text-red-700 ring-red-200" : "bg-emerald-50 text-emerald-700 ring-emerald-200"}>
+                  {whatsapp.last_error ? "Needs attention" : "Connected"}
+                </Chip>
+              )}
+              {isAdmin && (whatsapp
+                ? <button onClick={disconnectWhatsApp} className={btn.secondary}>Disconnect</button>
+                : <button onClick={connectWhatsApp} className={btn.primary}>Connect WhatsApp</button>)}
             </div>
           </Card>
         )}
