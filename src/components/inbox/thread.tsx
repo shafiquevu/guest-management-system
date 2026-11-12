@@ -39,6 +39,7 @@ export function Thread({
   const { supabase, api, canWrite, profile } = useApp();
   const [messages, setMessages] = useState<Message[]>([]);
   const [photos, setPhotos] = useState<Record<string, string[]>>({});
+  const [files, setFiles] = useState<Record<string, StoredFile[]>>({});
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -58,11 +59,15 @@ export function Thread({
     const rows = ((data ?? []) as Message[]).sort((a, b) => when(a).localeCompare(when(b)));
     setMessages(rows);
     // Stored copies of photos (the original Airbnb links expire after an hour).
-    if (rows.some((m) => parseMessage(m.body).images.length)) {
+    // WhatsApp photos, voice notes and files are stored copies too.
+    if (conversation.channel === "whatsapp" || rows.some((m) => parseMessage(m.body).images.length)) {
       const res = await api("/api/attachments", { json: { conversationId: conversation.id } });
-      if (res.ok) setPhotos(res.data.byMessage ?? {});
+      if (res.ok) {
+        setPhotos(res.data.byMessage ?? {});
+        setFiles(res.data.files ?? {});
+      }
     }
-  }, [supabase, api, conversation.id]);
+  }, [supabase, api, conversation.id, conversation.channel]);
   useLoader(load);
 
   const loadSaved = useCallback(async () => {
@@ -310,7 +315,7 @@ export function Thread({
                         : "bg-white text-slate-900 ring-1 ring-slate-200",
                     )}
                   >
-                    <MessageBody body={m.body} stored={photos[m.id]} />
+                    <MessageBody body={m.body} stored={photos[m.id]} files={files[m.id]} />
                   </div>
                   {!grouped || m.status === "failed" ? (
                     <div className={cx("mt-1 flex items-center gap-1 px-1 text-[11px] text-slate-400", m.direction === "outbound" && "justify-end")}>
@@ -442,9 +447,14 @@ function DeliveryIcon({ status }: { status: Message["status"] }) {
 }
 
 /** Text plus any photos (Airbnb sends them as links); the HTML itself is never rendered. */
-function MessageBody({ body, stored }: { body: string | null; stored?: string[] }) {
+type StoredFile = { url: string; type: string; name: string };
+
+/** WhatsApp bodies start with a label ("📷 Photo") that the real photo or player replaces. */
+const MEDIA_LABEL = /^(📷 Photo|🎥 Video|🎤 Voice message|📎 Document(?: \([^)]*\))?|Sticker)\n?/u;
+
+function MessageBody({ body, stored, files }: { body: string | null; stored?: string[]; files?: StoredFile[] }) {
   const parsed = parseMessage(body);
-  const text = parsed.text;
+  const text = stored?.length || files?.length ? parsed.text.replace(MEDIA_LABEL, "").trim() : parsed.text;
   const images: MessageImage[] = stored?.length ? stored.map((url) => ({ src: url, href: url })) : parsed.images;
   return (
     <>
@@ -456,6 +466,19 @@ function MessageBody({ body, stored }: { body: string | null; stored?: string[] 
           ))}
         </div>
       )}
+      {files?.map((f) => (
+        <div key={f.url} className={cx(text || images.length ? "mt-2" : "")}>
+          {f.type.startsWith("audio/") ? (
+            <audio controls preload="none" src={f.url} className="max-w-full" />
+          ) : f.type.startsWith("video/") ? (
+            <video controls preload="metadata" src={f.url} className="max-h-64 max-w-full rounded-lg" />
+          ) : (
+            <a href={f.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg bg-black/10 px-2.5 py-1.5 text-xs underline">
+              📎 {f.name}
+            </a>
+          )}
+        </div>
+      ))}
     </>
   );
 }

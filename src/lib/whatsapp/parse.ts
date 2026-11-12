@@ -23,6 +23,8 @@ export type WaMessage = {
   text: string;
   type: string;
   businessNumber: string;
+  /** A photo or file to download through 360dialog (WhatsApp media ids expire after ~30 days). */
+  media?: { id: string; mime: string; filename?: string };
 };
 
 export type WaStatus = {
@@ -79,6 +81,15 @@ export function messageText(m: any): string {
   return `(${type || "message"})`;
 }
 
+/** The downloadable media in a message, if any. */
+export function messageMedia(m: any): WaMessage["media"] {
+  const type = String(m?.type ?? "");
+  if (!MEDIA_LABEL[type] || type === "location" || type === "contacts") return undefined;
+  const media = m[type];
+  if (!media?.id) return undefined;
+  return { id: String(media.id), mime: String(media.mime_type ?? ""), ...(media.filename ? { filename: String(media.filename) } : {}) };
+}
+
 function errorText(s: any): string | null {
   const e = s?.errors?.[0];
   if (!e) return null;
@@ -107,6 +118,7 @@ export function parseWebhook(body: any): WaEvent[] {
             text: messageText(m),
             type: String(m.type ?? ""),
             businessNumber: business,
+            ...(messageMedia(m) ? { media: messageMedia(m) } : {}),
           });
         }
         for (const s of value.statuses ?? []) {
@@ -133,6 +145,7 @@ export function parseWebhook(body: any): WaEvent[] {
             text: messageText(m),
             type: String(m.type ?? ""),
             businessNumber: business || digits(m.from),
+            ...(messageMedia(m) ? { media: messageMedia(m) } : {}),
           });
         }
       }

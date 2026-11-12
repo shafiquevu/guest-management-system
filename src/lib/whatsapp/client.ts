@@ -52,6 +52,25 @@ export async function sendWhatsAppText(to: string, text: string): Promise<{ id: 
   return { id, raw: data };
 }
 
+/**
+ * Download a photo or file a guest sent. WhatsApp gives a media id; 360dialog
+ * returns a Meta link for it, which must be fetched back through 360dialog
+ * (same path, 360dialog's host, our API key). Links only work for ~5 minutes,
+ * so this runs as soon as the message arrives.
+ */
+export async function downloadMedia(mediaId: string): Promise<{ bytes: Uint8Array; type: string }> {
+  const meta = await d360<{ url?: string; mime_type?: string }>("GET", `/${encodeURIComponent(mediaId)}`);
+  if (!meta.url) throw new WhatsAppError("360dialog returned no link for this media.");
+  const link = new URL(meta.url);
+  const res = await fetch(`${BASE}${link.pathname}${link.search}`, {
+    headers: { "D360-API-KEY": process.env.D360_API_KEY ?? "" },
+    cache: "no-store",
+  });
+  if (!res.ok) throw new WhatsAppError(`Media download failed (HTTP ${res.status}).`, res.status);
+  const type = (res.headers.get("content-type") ?? meta.mime_type ?? "").split(";")[0].trim();
+  return { bytes: new Uint8Array(await res.arrayBuffer()), type: type || meta.mime_type || "application/octet-stream" };
+}
+
 export function webhookUrl(origin: string): string {
   const base = (process.env.APP_URL || origin).replace(/\/$/, "");
   return `${base}/api/webhooks/whatsapp?key=${encodeURIComponent(process.env.WHATSAPP_WEBHOOK_KEY ?? "")}`;

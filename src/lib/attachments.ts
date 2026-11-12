@@ -13,7 +13,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 export const BUCKET = "message-attachments";
 
 let bucketReady = false;
-async function ensureBucket() {
+export async function ensureBucket() {
   if (bucketReady) return;
   const db = supabaseAdmin();
   const { data } = await db.storage.getBucket(BUCKET);

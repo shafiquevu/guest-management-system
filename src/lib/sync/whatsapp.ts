@@ -1,7 +1,9 @@
 import "server-only";
 
+import { BUCKET, ensureBucket } from "@/lib/attachments";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { refreshConversation } from "@/lib/sync/beds24";
+import { downloadMedia } from "@/lib/whatsapp/client";
 import type { WaEvent, WaMessage, WaStatus } from "@/lib/whatsapp/parse";
 
 /**
@@ -122,7 +124,7 @@ async function saveMessages(conn: Connection, guest: string, list: WaMessage[]):
       recipient_address: ours ? `+${m.guest}` : m.businessNumber ? `+${m.businessNumber}` : null,
       body: m.text || "(empty message)",
       content_type: "text",
-      raw_payload: { id: m.id, type: m.type, kind: m.kind },
+      raw_payload: { id: m.id, type: m.type, kind: m.kind, ...(m.media ? { media: m.media } : {}) },
       received_at: ours ? null : m.at,
       sent_at: ours ? m.at : null,
     };
@@ -130,8 +132,14 @@ async function saveMessages(conn: Connection, guest: string, list: WaMessage[]):
   const { data: inserted, error } = await db
     .from("messages")
     .upsert(rows, { onConflict: "organization_id,channel,external_message_id", ignoreDuplicates: true })
-    .select("id, direction");
+    .select("id, direction, external_message_id");
   if (error) throw new Error(`messages: ${error.message}`);
+
+  const byExt = new Map(list.map((m) => [`whatsapp:${m.id}`, m]));
+  for (const row of inserted ?? []) {
+    const media = byExt.get(row.external_message_id)?.media;
+    if (media) await saveMedia(orgId, row.id, media);
+  }
 
   const newInbound = (inserted ?? []).filter((r) => r.direction === "inbound").length;
   const reopen = newInbound > 0 && ["resolved", "archived"].includes(conversation.status);
@@ -218,4 +226,35 @@ async function ensureGuest(orgId: string, number: string, name: string): Promise
       { onConflict: "organization_id,channel,address", ignoreDuplicates: true },
     );
   return guestId;
+}
+
+const EXT: Record<string, string> = {
+  "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif", "image/heic": "heic",
+  "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a", "audio/aac": "aac", "audio/amr": "amr",
+  "video/mp4": "mp4", "video/3gpp": "3gp", "application/pdf": "pdf",
+};
+
+/** Copy a guest's photo / voice note / video / file into private storage. Never throws. */
+async function saveMedia(orgId: string, messageId: string, media: NonNullable<WaMessage["media"]>) {
+  try {
+    await ensureBucket();
+    const { bytes, type } = await downloadMedia(media.id);
+    if (bytes.byteLength > 20 * 1024 * 1024) return; // the bucket's limit
+    const safe = (media.filename ?? "").replace(/[^\w.\- ]+/g, "").trim();
+    const name = safe || `${type.split("/")[0] || "file"}.${EXT[type] ?? "bin"}`;
+    const path = `${orgId}/${messageId}/${name}`;
+    const db = supabaseAdmin();
+    const { error } = await db.storage.from(BUCKET).upload(path, bytes, { contentType: type, upsert: true });
+    if (error) throw new Error(error.message);
+    await db.from("message_attachments").insert({
+      organization_id: orgId,
+      message_id: messageId,
+      file_name: name,
+      file_type: type,
+      file_size: bytes.byteLength,
+      storage_path: path,
+    });
+  } catch (e) {
+    console.error("whatsapp media", media.id, e instanceof Error ? e.message : e);
+  }
 }

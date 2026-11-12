@@ -73,3 +73,23 @@ test("send errors read in plain language", () => {
   assert.match(sendErrorText({}, 401), /API key/);
   assert.equal(sendErrorText({ error: { message: "Invalid parameter" } }, 400), "WhatsApp: Invalid parameter");
 });
+
+test("photos, voice notes and documents carry their media id for download", () => {
+  const events = parseWebhook(
+    wrap("messages", {
+      messages: [
+        { from: "447700900222", id: "wamid.P", timestamp: "1762950000", type: "image", image: { id: "media1", mime_type: "image/jpeg", caption: "door panel" } },
+        { from: "447700900222", id: "wamid.V", timestamp: "1762950001", type: "audio", audio: { id: "media2", mime_type: "audio/ogg; codecs=opus", voice: true } },
+        { from: "447700900222", id: "wamid.D", timestamp: "1762950002", type: "document", document: { id: "media3", mime_type: "application/pdf", filename: "passport.pdf" } },
+        { from: "447700900222", id: "wamid.L", timestamp: "1762950003", type: "location", location: { latitude: 1, longitude: 2 } },
+      ],
+    }),
+  );
+  const media = events.map((e) => (e.kind !== "status" ? e.media : undefined));
+  assert.deepEqual(media, [
+    { id: "media1", mime: "image/jpeg" },
+    { id: "media2", mime: "audio/ogg; codecs=opus" },
+    { id: "media3", mime: "application/pdf", filename: "passport.pdf" },
+    undefined,
+  ]);
+});
