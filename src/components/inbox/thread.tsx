@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { AlertCircle, BookOpen, Check, CheckCheck, CheckCircle2, Clock, ImageOff, RotateCcw, Send, ShieldAlert, Sparkles } from "lucide-react";
+import { AlertCircle, BookOpen, Check, CheckCheck, CheckCircle2, ChevronLeft, ChevronRight, Clock, Download, ExternalLink, ImageOff, RotateCcw, Send, ShieldAlert, Sparkles, X } from "lucide-react";
 import { useApp } from "@/components/app-shell";
 import { Avatar, btn, ChannelBadge, cx } from "@/components/ui";
 import { CATEGORY_LABEL, CHANNEL_LABEL, clock, dayLabel, parseMessage, type MessageImage } from "@/lib/format";
@@ -214,6 +214,23 @@ export function Thread({
     [messages],
   );
 
+  // Every photo in the conversation, oldest first, for the full-screen viewer.
+  const gallery = useMemo<GalleryItem[]>(
+    () =>
+      messages.flatMap((m) => {
+        if (m.content_type === "system") return [];
+        const { text, images } = messageParts(m.body, photos[m.id], files[m.id]);
+        const sender = m.direction === "inbound" ? guestName : m.sender_name || "Team";
+        return images.map((img) => ({ ...img, caption: text, sender, at: when(m) }));
+      }),
+    [messages, photos, files, guestName],
+  );
+  const [viewer, setViewer] = useState<number | null>(null);
+  const openPhoto = (src: string) => {
+    const i = gallery.findIndex((g) => g.src === src);
+    if (i >= 0) setViewer(i);
+  };
+
   return (
     <>
       {/* header */}
@@ -283,6 +300,10 @@ export function Thread({
         )
       )}
 
+      {viewer !== null && gallery[viewer] && (
+        <PhotoViewer items={gallery} index={viewer} onIndex={setViewer} onClose={() => setViewer(null)} />
+      )}
+
       {/* messages */}
       <div className="scroll-thin relative min-h-0 flex-1 overflow-y-auto px-5 py-4">
         {messages.length === 0 && <p className="text-center text-sm text-slate-500">No messages yet.</p>}
@@ -315,7 +336,7 @@ export function Thread({
                         : "bg-white text-slate-900 ring-1 ring-slate-200",
                     )}
                   >
-                    <MessageBody body={m.body} stored={photos[m.id]} files={files[m.id]} />
+                    <MessageBody body={m.body} stored={photos[m.id]} files={files[m.id]} onOpen={openPhoto} />
                   </div>
                   {!grouped || m.status === "failed" ? (
                     <div className={cx("mt-1 flex items-center gap-1 px-1 text-[11px] text-slate-400", m.direction === "outbound" && "justify-end")}>
@@ -452,17 +473,33 @@ type StoredFile = { url: string; type: string; name: string };
 /** WhatsApp bodies start with a label ("📷 Photo") that the real photo or player replaces. */
 const MEDIA_LABEL = /^(📷 Photo|🎥 Video|🎤 Voice message|📎 Document(?: \([^)]*\))?|Sticker)\n?/u;
 
-function MessageBody({ body, stored, files }: { body: string | null; stored?: string[]; files?: StoredFile[] }) {
+/** The text and photos of one message: stored copies win over the original (expiring) links. */
+function messageParts(body: string | null, stored?: string[], files?: StoredFile[]): { text: string; images: MessageImage[] } {
   const parsed = parseMessage(body);
   const text = stored?.length || files?.length ? parsed.text.replace(MEDIA_LABEL, "").trim() : parsed.text;
   const images: MessageImage[] = stored?.length ? stored.map((url) => ({ src: url, href: url })) : parsed.images;
+  return { text, images };
+}
+
+function MessageBody({
+  body,
+  stored,
+  files,
+  onOpen,
+}: {
+  body: string | null;
+  stored?: string[];
+  files?: StoredFile[];
+  onOpen?: (src: string) => void;
+}) {
+  const { text, images } = messageParts(body, stored, files);
   return (
     <>
       {text && <p className="whitespace-pre-wrap wrap-break-word">{text}</p>}
       {images.length > 0 && (
         <div className={cx("flex flex-wrap gap-1.5", text && "mt-2")}>
           {images.map((img) => (
-            <Photo key={img.src} image={img} />
+            <Photo key={img.src} image={img} onOpen={onOpen} />
           ))}
         </div>
       )}
@@ -483,7 +520,7 @@ function MessageBody({ body, stored, files }: { body: string | null; stored?: st
   );
 }
 
-function Photo({ image }: { image: MessageImage }) {
+function Photo({ image, onOpen }: { image: MessageImage; onOpen?: (src: string) => void }) {
   const [broken, setBroken] = useState(false);
   if (broken) {
     // Airbnb photo links are signed and expire after a while.
@@ -494,7 +531,17 @@ function Photo({ image }: { image: MessageImage }) {
     );
   }
   return (
-    <a href={image.href} target="_blank" rel="noopener noreferrer" className="block overflow-hidden rounded-lg bg-black/5">
+    <a
+      href={image.href}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(e) => {
+        if (!onOpen) return;
+        e.preventDefault();
+        onOpen(image.src);
+      }}
+      className="block cursor-zoom-in overflow-hidden rounded-lg bg-black/5"
+    >
       {/* eslint-disable-next-line @next/next/no-img-element -- signed third-party URLs; next/image would need every host whitelisted */}
       <img
         src={image.src}
@@ -505,5 +552,145 @@ function Photo({ image }: { image: MessageImage }) {
         className="max-h-64 max-w-full object-cover"
       />
     </a>
+  );
+}
+
+type GalleryItem = MessageImage & { caption: string; sender: string; at: string };
+
+/** Full-screen photo viewer, WhatsApp style: arrows or ← → to move, Esc to close, thumbnails below. */
+function PhotoViewer({
+  items,
+  index,
+  onIndex,
+  onClose,
+}: {
+  items: GalleryItem[];
+  index: number;
+  onIndex: (i: number) => void;
+  onClose: () => void;
+}) {
+  const item = items[index];
+  const strip = useRef<HTMLDivElement>(null);
+  const go = useCallback((d: number) => onIndex(Math.min(items.length - 1, Math.max(0, index + d))), [index, items.length, onIndex]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowLeft") go(-1);
+      else if (e.key === "ArrowRight") go(1);
+    };
+    window.addEventListener("keydown", onKey);
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = overflow;
+    };
+  }, [go, onClose]);
+
+  useEffect(() => {
+    strip.current?.querySelector<HTMLElement>(`[data-i="${index}"]`)?.scrollIntoView({ block: "nearest", inline: "center" });
+  }, [index]);
+
+  if (!item) return null;
+
+  async function download() {
+    try {
+      const res = await fetch(item.href);
+      if (!res.ok) throw new Error(String(res.status));
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `photo-${item.at.slice(0, 10)}.${(blob.type.split("/")[1] || "jpg").replace("jpeg", "jpg")}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      window.open(item.href, "_blank", "noopener,noreferrer"); // links that refuse cross-site reads
+    }
+  }
+
+  const iconBtn = "rounded-full p-2 text-white/80 hover:bg-white/10 hover:text-white";
+  const navBtn = "absolute rounded-full bg-white/10 p-2.5 text-white hover:bg-white/20";
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col bg-black/95" role="dialog" aria-modal="true" aria-label="Photo viewer" onClick={onClose}>
+      <div className="flex items-center gap-3 px-4 py-3" onClick={(e) => e.stopPropagation()}>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-white">{item.sender}</p>
+          <p className="text-xs text-white/60">
+            {dayLabel(item.at)} at {clock(item.at)}
+            {items.length > 1 && ` · ${index + 1} of ${items.length}`}
+          </p>
+        </div>
+        <button className={iconBtn} onClick={download} title="Download">
+          <Download className="h-5 w-5" />
+        </button>
+        <a className={iconBtn} href={item.href} target="_blank" rel="noopener noreferrer" title="Open in new tab">
+          <ExternalLink className="h-5 w-5" />
+        </a>
+        <button className={iconBtn} onClick={onClose} title="Close (Esc)">
+          <X className="h-6 w-6" />
+        </button>
+      </div>
+
+      <div className="relative flex min-h-0 flex-1 items-center justify-center px-16">
+        {index > 0 && (
+          <button
+            className={cx(navBtn, "left-3")}
+            onClick={(e) => {
+              e.stopPropagation();
+              go(-1);
+            }}
+            title="Previous (←)"
+          >
+            <ChevronLeft className="h-6 w-6" />
+          </button>
+        )}
+        {/* eslint-disable-next-line @next/next/no-img-element -- signed storage / third-party URLs */}
+        <img
+          src={item.src}
+          alt="Photo in conversation"
+          referrerPolicy="no-referrer"
+          onClick={(e) => e.stopPropagation()}
+          className="max-h-full max-w-full object-contain"
+        />
+        {index < items.length - 1 && (
+          <button
+            className={cx(navBtn, "right-3")}
+            onClick={(e) => {
+              e.stopPropagation();
+              go(1);
+            }}
+            title="Next (→)"
+          >
+            <ChevronRight className="h-6 w-6" />
+          </button>
+        )}
+      </div>
+
+      <div onClick={(e) => e.stopPropagation()}>
+        {item.caption && <p className="mx-auto max-w-2xl px-4 pt-3 text-center text-sm whitespace-pre-wrap text-white/90">{item.caption}</p>}
+        {items.length > 1 ? (
+          <div ref={strip} className="mt-3 flex justify-center gap-2 overflow-x-auto border-t border-white/10 px-4 py-3">
+            {items.map((g, i) => (
+              <button
+                key={g.src}
+                data-i={i}
+                onClick={() => onIndex(i)}
+                className={cx(
+                  "h-14 w-14 shrink-0 overflow-hidden rounded-md ring-2",
+                  i === index ? "ring-emerald-400" : "opacity-60 ring-transparent hover:opacity-100",
+                )}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element -- thumbnails of the same signed URLs */}
+                <img src={g.src} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="h-4" />
+        )}
+      </div>
+    </div>
   );
 }
