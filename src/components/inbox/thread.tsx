@@ -458,6 +458,8 @@ export function Thread({
                         who={(q) => who(q)}
                         dark={m.direction === "outbound"}
                         padded={hasPhotos(m)}
+                        photos={photos}
+                        files={files}
                       />
                     )}
                     <MessageBody body={m.body} stored={photos[m.id]} files={files[m.id]} onOpen={openPhoto} />
@@ -889,33 +891,66 @@ function PhotoViewer({
   );
 }
 
-/** The message a WhatsApp reply quotes, shown at the top of the bubble. */
+/** The message a WhatsApp reply quotes, shown at the top of the bubble (WhatsApp style). */
 function Quote({
   quoted,
   who,
   dark,
   padded,
+  photos,
+  files,
 }: {
   quoted: Message | null;
   who: (m: Message) => string;
   dark: boolean;
   padded: boolean;
+  photos: Record<string, string[]>;
+  files: Record<string, StoredFile[]>;
 }) {
+  const fromGuest = quoted?.direction === "inbound";
+  // Guest messages get a green bar and name, the team's a blue one — like WhatsApp's per-sender colours.
+  const bar = fromGuest ? (dark ? "bg-emerald-300" : "bg-emerald-500") : dark ? "bg-sky-300" : "bg-indigo-500";
+  const name = fromGuest ? (dark ? "text-emerald-200" : "text-emerald-700") : dark ? "text-sky-200" : "text-indigo-700";
+
+  let icon = "";
+  let line = "";
+  let thumb: string | undefined;
+  if (quoted) {
+    const body = quoted.body ?? "";
+    const label = body.match(MEDIA_LABEL)?.[1] ?? "";
+    icon = label ? label.split(" ")[0] : "";
+    const { text, images } = messageParts(body, photos[quoted.id], files[quoted.id]);
+    const caption = (label ? body.replace(MEDIA_LABEL, "").trim() : text) || "";
+    line = caption || (label ? label.replace(/^\S+\s/, "") : messagePreview(body)) || (images.length ? "Photo" : "");
+    if (images.length && !icon) icon = "📷";
+    thumb = images[0]?.src;
+  }
+
   return (
     <div
       className={cx(
-        "mb-1.5 rounded-lg border-l-4 px-2 py-1 text-xs",
-        dark ? "border-white/70 bg-white/15 text-white/90" : "border-emerald-500 bg-slate-100 text-slate-600",
+        "mb-1.5 flex overflow-hidden rounded-lg text-xs",
+        dark ? "bg-black/20 text-white/85" : "bg-slate-100 text-slate-600",
         padded && "m-1.5 mb-0",
       )}
     >
-      {quoted ? (
-        <>
-          <p className={cx("font-semibold", dark ? "text-white" : "text-emerald-700")}>{who(quoted)}</p>
-          <p className="line-clamp-2 whitespace-pre-wrap">{messagePreview(quoted.body)}</p>
-        </>
-      ) : (
-        <p className="italic">A message that is not in this conversation</p>
+      <span className={cx("w-1 shrink-0", bar)} aria-hidden />
+      <div className="min-w-0 flex-1 px-2 py-1.5">
+        {quoted ? (
+          <>
+            <p className={cx("truncate font-semibold", name)}>{who(quoted)}</p>
+            <p className="line-clamp-2 whitespace-pre-wrap">
+              {icon && <span className="mr-1">{icon}</span>}
+              {line}
+            </p>
+          </>
+        ) : (
+          <p className="italic">A message that is not in this conversation</p>
+        )}
+      </div>
+      {thumb && (
+        // eslint-disable-next-line @next/next/no-img-element -- signed storage URL
+        <img src={thumb} alt="" referrerPolicy="no-referrer" className="h-14 w-14 shrink-0 object-cover" />
       )}
     </div>
   );
