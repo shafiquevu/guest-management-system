@@ -122,7 +122,13 @@ export function prettyPhone(raw: string | null | undefined): string | null {
 }
 
 export function initials(name: string | null | undefined): string {
-  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
+  const raw = (name ?? "").trim();
+  // A phone number (an unknown WhatsApp sender): its last two digits, not "+".
+  if (raw && !/\p{L}/u.test(raw)) {
+    const digits = raw.replace(/\D/g, "");
+    return digits ? digits.slice(-2) : "?";
+  }
+  const parts = raw.split(/\s+/).filter(Boolean);
   if (!parts.length) return "?";
   return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
 }

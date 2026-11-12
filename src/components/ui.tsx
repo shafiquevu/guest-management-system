@@ -61,9 +61,9 @@ export function ChannelBadge({ channel, compact = false }: { channel: string; co
 /** A small avatar with the channel's mark in the corner. */
 export function GuestAvatar({ name, channel }: { name: string | null | undefined; channel: string }) {
   return (
-    <span className="relative inline-flex">
+    <span className="relative inline-flex h-fit shrink-0 self-start">
       <Avatar name={name} />
-      <span className="absolute -right-1 -bottom-1 rounded-full ring-2 ring-white">
+      <span className="absolute -right-1.5 -bottom-1 rounded-full ring-2 ring-white">
         <ChannelLogo channel={channel} size="md" />
       </span>
     </span>
