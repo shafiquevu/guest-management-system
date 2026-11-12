@@ -3,7 +3,9 @@ import { beds24, isConfigured } from "@/lib/beds24/client";
 import { sendGmailReply } from "@/lib/gmail/send";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { refreshConversation } from "@/lib/sync/beds24";
-import { sendWhatsAppText, whatsappConfigured } from "@/lib/whatsapp/client";
+import { BUCKET } from "@/lib/attachments";
+import { sendWhatsAppMedia, sendWhatsAppText, whatsappConfigured } from "@/lib/whatsapp/client";
+import { attachmentBody, checkAttachment, mediaKind, safeFileName } from "@/lib/whatsapp/media";
 
 export const maxDuration = 30;
 
@@ -13,6 +15,9 @@ type MultiPostResult = { success?: boolean; errors?: { message?: string }[] }[];
  * Reply to a guest.
  *
  * Body: { conversationId, body, clientKey }  -- a new reply
+ *       { ..., attachment: { path, name, type, size } }
+ *                                            -- WhatsApp only: a file already uploaded
+ *                                               via /api/attachments/upload; body is the caption
  *       { retryMessageId }                   -- try a failed reply again
  *
  * The reply is stored first as `pending` under local:<clientKey>, so a double
@@ -30,12 +35,13 @@ export async function POST(request: Request) {
     const input = await request.json().catch(() => ({}));
     const db = supabaseAdmin();
 
-    let row: { id: string; conversation_id: string; body: string; status: string } | null = null;
+    type Attachment = { path: string; name: string; type: string; size?: number };
+    let row: { id: string; conversation_id: string; body: string; status: string; raw_payload?: unknown } | null = null;
 
     if (input?.retryMessageId) {
       const { data } = await db
         .from("messages")
-        .select("id, conversation_id, body, status")
+        .select("id, conversation_id, body, status, raw_payload")
         .eq("id", String(input.retryMessageId))
         .single();
       if (!data || data.status !== "failed") {
@@ -44,12 +50,18 @@ export async function POST(request: Request) {
       row = data;
     }
 
+    // A retried attachment keeps its file and caption in raw_payload.
+    const stored = (row?.raw_payload ?? null) as { attachment?: Attachment; caption?: string } | null;
+    const attachment: Attachment | null = stored?.attachment
+      ?? (input?.attachment?.path
+        ? { path: String(input.attachment.path), name: String(input.attachment.name ?? "file"), type: String(input.attachment.type ?? ""), size: Number(input.attachment.size) || 0 }
+        : null);
     const conversationId = row?.conversation_id ?? String(input?.conversationId ?? "");
-    const text = (row?.body ?? String(input?.body ?? "")).trim();
+    const text = attachment ? (stored?.caption ?? String(input?.body ?? "")).trim() : (row?.body ?? String(input?.body ?? "")).trim();
     const clientKey = String(input?.clientKey ?? "");
 
     if (!conversationId) return Response.json({ error: "Missing conversation." }, { status: 400 });
-    if (!text || text.length > 5000) {
+    if ((!text && !attachment) || text.length > 5000) {
       return Response.json({ error: "Write a reply between 1 and 5000 characters." }, { status: 400 });
     }
     if (!row && !/^[\w-]{8,64}$/.test(clientKey)) {
@@ -69,6 +81,20 @@ export async function POST(request: Request) {
     if (!viaGmail && !viaWhatsApp && !["airbnb", "booking_com", "beds24"].includes(conversation.channel)) {
       return Response.json({ error: "Replying on this channel is not connected yet." }, { status: 400 });
     }
+
+    if (attachment) {
+      if (!viaWhatsApp) return Response.json({ error: "Attachments can be sent on WhatsApp conversations only." }, { status: 400 });
+      // Only files uploaded for this organisation, through our upload slot.
+      if (!attachment.path.startsWith(`${conversation.organization_id}/outbox/`) || attachment.path.includes("..")) {
+        return Response.json({ error: "Unknown attachment." }, { status: 400 });
+      }
+      if (!row && attachment.size) {
+        const problem = checkAttachment(attachment as { name: string; type: string; size: number });
+        if (problem) return Response.json({ error: problem }, { status: 400 });
+      }
+    }
+    const kind = attachment ? mediaKind(attachment.type) : null;
+    const fileName = attachment ? safeFileName(attachment.name) : "";
 
     let waNumber = "";
     if (viaWhatsApp) {
@@ -101,7 +127,8 @@ export async function POST(request: Request) {
             status: "pending",
             sender_name: staff.fullName,
             sent_by: staff.id,
-            body: text,
+            body: attachment && kind ? attachmentBody(kind, fileName, text) : text,
+            ...(attachment ? { raw_payload: { attachment, caption: text } } : {}),
           },
           { onConflict: "organization_id,channel,external_message_id", ignoreDuplicates: true },
         )
@@ -119,6 +146,17 @@ export async function POST(request: Request) {
         return Response.json({ messageId: existing?.id, status: existing?.status, duplicate: true });
       }
       row = inserted;
+      // The thread shows the file straight away, like a received one.
+      if (attachment && inserted) {
+        await db.from("message_attachments").insert({
+          organization_id: conversation.organization_id,
+          message_id: inserted.id,
+          file_name: fileName,
+          file_type: attachment.type || null,
+          file_size: attachment.size || null,
+          storage_path: attachment.path,
+        });
+      }
     } else {
       await db.from("messages").update({ status: "pending", provider_error: null }).eq("id", row.id);
     }
@@ -154,7 +192,14 @@ export async function POST(request: Request) {
       }
     } else if (viaWhatsApp) {
       try {
-        const sent = await sendWhatsAppText(waNumber, text);
+        let sent: { id: string; raw: unknown };
+        if (attachment && kind) {
+          const { data: link, error: linkError } = await db.storage.from(BUCKET).createSignedUrl(attachment.path, 600);
+          if (linkError || !link) throw new Error(`The file could not be read: ${linkError?.message ?? "not found"}`);
+          sent = await sendWhatsAppMedia(waNumber, kind, link.signedUrl, text, fileName);
+        } else {
+          sent = await sendWhatsAppText(waNumber, text);
+        }
         providerResponse = sent.raw;
         externalId = `whatsapp:${sent.id}`; // delivery receipts arrive under this id
         status = "sent";

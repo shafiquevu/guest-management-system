@@ -1,11 +1,12 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { AlertCircle, BookOpen, Check, CheckCheck, CheckCircle2, ChevronLeft, ChevronRight, Clock, Download, ExternalLink, ImageOff, RotateCcw, Send, ShieldAlert, Sparkles, X } from "lucide-react";
+import { AlertCircle, BookOpen, Check, CheckCheck, CheckCircle2, ChevronLeft, ChevronRight, Clock, Download, ExternalLink, FileText, ImageOff, Paperclip, RotateCcw, Send, ShieldAlert, Sparkles, X } from "lucide-react";
 import { useApp } from "@/components/app-shell";
 import { Avatar, btn, ChannelBadge, cx } from "@/components/ui";
 import { CATEGORY_LABEL, CHANNEL_LABEL, clock, dayLabel, parseMessage, type MessageImage } from "@/lib/format";
 import { useLoader } from "@/lib/use-loader";
+import { ACCEPT, checkAttachment } from "@/lib/whatsapp/media";
 import type { ConversationRow, StaffOption } from "./inbox";
 
 type Message = {
@@ -41,6 +42,25 @@ export function Thread({
   const [photos, setPhotos] = useState<Record<string, string[]>>({});
   const [files, setFiles] = useState<Record<string, StoredFile[]>>({});
   const [draft, setDraft] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+
+  const picker = useRef<HTMLInputElement>(null);
+  const canAttach = conversation.channel === "whatsapp";
+
+  // A thumbnail for a chosen photo; freed when the file changes.
+  const preview = useMemo(() => (file && file.type.startsWith("image/") ? URL.createObjectURL(file) : null), [file]);
+  useEffect(() => () => {
+    if (preview) URL.revokeObjectURL(preview);
+  }, [preview]);
+
+  function choose(f: File | undefined) {
+    if (!f) return;
+    const problem = checkAttachment(f);
+    if (problem) return setSendError(problem);
+    setSendError(null);
+    setFile(f);
+    box.current?.focus();
+  }
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [saved, setSaved] = useState<SavedReply[]>([]);
@@ -119,15 +139,37 @@ export function Thread({
   async function send(event?: FormEvent) {
     event?.preventDefault();
     const text = draft.trim();
-    if (!text || sending) return;
+    if ((!text && !file) || sending) return;
     setSending(true);
     setSendError(null);
+
+    // A file goes straight to private storage first, then the send references it.
+    let attachment: { path: string; name: string; type: string; size: number } | undefined;
+    if (file) {
+      const slot = await api("/api/attachments/upload", {
+        json: { conversationId: conversation.id, name: file.name, type: file.type, size: file.size },
+      });
+      if (!slot.ok) {
+        setSending(false);
+        return setSendError(slot.data?.error ?? "The file could not be uploaded.");
+      }
+      const { error } = await supabase.storage
+        .from("message-attachments")
+        .uploadToSignedUrl(slot.data.path, slot.data.token, file, { contentType: file.type || "application/octet-stream" });
+      if (error) {
+        setSending(false);
+        return setSendError(`The file could not be uploaded: ${error.message}`);
+      }
+      attachment = { path: slot.data.path, name: file.name, type: file.type, size: file.size };
+    }
+
     const res = await api("/api/send", {
-      json: { conversationId: conversation.id, body: text, clientKey: crypto.randomUUID() },
+      json: { conversationId: conversation.id, body: text, clientKey: crypto.randomUUID(), ...(attachment ? { attachment } : {}) },
     });
     setSending(false);
     if (res.ok) {
       setDraft("");
+      setFile(null);
       setAiNote(null);
     } else setSendError(res.data?.error ?? "The reply could not be sent.");
     load();
@@ -386,7 +428,34 @@ export function Thread({
               {aiNote.managerNeeded && <> The guest is asking for something a manager must approve.</>}
             </div>
           )}
-          <div className="rounded-xl bg-white shadow-sm ring-1 ring-slate-200 focus-within:ring-2 focus-within:ring-indigo-500">
+          <div
+            className="rounded-xl bg-white shadow-sm ring-1 ring-slate-200 focus-within:ring-2 focus-within:ring-indigo-500"
+            onDragOver={(e) => canAttach && e.preventDefault()}
+            onDrop={(e) => {
+              if (!canAttach) return;
+              e.preventDefault();
+              choose(e.dataTransfer.files?.[0]);
+            }}
+          >
+            {file && (
+              <div className="flex items-center gap-3 border-b border-slate-100 px-3 py-2">
+                {preview ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- local preview of the chosen file
+                  <img src={preview} alt="" className="h-12 w-12 rounded-md object-cover" />
+                ) : (
+                  <span className="flex h-12 w-12 items-center justify-center rounded-md bg-slate-100 text-slate-500">
+                    <FileText className="h-5 w-5" />
+                  </span>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-slate-900">{file.name}</p>
+                  <p className="text-xs text-slate-500">{(file.size / 1024 / 1024).toFixed(1)} MB · the text below is sent as its caption</p>
+                </div>
+                <button type="button" onClick={() => setFile(null)} className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Remove file">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
             <textarea
               ref={box}
               value={draft}
@@ -396,11 +465,28 @@ export function Thread({
               }}
               rows={2}
               maxLength={5000}
-              placeholder={`Reply to ${guestName} on ${CHANNEL_LABEL[conversation.channel] ?? "this channel"}…`}
+              placeholder={file ? "Add a caption (optional)…" : `Reply to ${guestName} on ${CHANNEL_LABEL[conversation.channel] ?? "this channel"}…`}
               className="block w-full resize-none rounded-t-xl border-0 bg-transparent px-3.5 pt-3 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none"
               aria-label="Reply"
             />
             <div className="relative flex items-center gap-2 px-2 pb-2">
+              {canAttach && (
+                <>
+                  <input
+                    ref={picker}
+                    type="file"
+                    accept={ACCEPT}
+                    className="hidden"
+                    onChange={(e) => {
+                      choose(e.target.files?.[0]);
+                      e.target.value = "";
+                    }}
+                  />
+                  <button type="button" onClick={() => picker.current?.click()} className={btn.ghost} title="Attach a photo, video, voice note or file">
+                    <Paperclip className="h-4 w-4" /> Attach
+                  </button>
+                </>
+              )}
               <button
                 type="button"
                 onClick={() => setShowSaved((s) => !s)}
@@ -435,7 +521,7 @@ export function Thread({
                 </div>
               )}
               <span className="ml-auto text-[11px] text-slate-400">Ctrl+Enter to send</span>
-              <button type="submit" disabled={sending || !draft.trim()} className={btn.primary}>
+              <button type="submit" disabled={sending || (!draft.trim() && !file)} className={btn.primary}>
                 <Send className="h-4 w-4" />
                 {sending ? "Sending…" : "Send"}
               </button>

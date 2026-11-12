@@ -71,6 +71,34 @@ export async function downloadMedia(mediaId: string): Promise<{ bytes: Uint8Arra
   return { bytes: new Uint8Array(await res.arrayBuffer()), type: type || meta.mime_type || "application/octet-stream" };
 }
 
+/**
+ * Send a photo, video, voice note or document. `link` is a short-lived signed
+ * URL to our private storage; WhatsApp downloads the file from it once.
+ * Audio can't carry a caption, so a caption on audio goes as a second text.
+ */
+export async function sendWhatsAppMedia(
+  to: string,
+  kind: "image" | "video" | "audio" | "document",
+  link: string,
+  caption: string,
+  fileName: string,
+): Promise<{ id: string; raw: unknown }> {
+  const media: Record<string, string> = { link };
+  if (caption && kind !== "audio") media.caption = caption;
+  if (kind === "document") media.filename = fileName;
+  const data = await d360<{ messages?: { id: string }[] }>("POST", "/messages", {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to,
+    type: kind,
+    [kind]: media,
+  });
+  const id = data.messages?.[0]?.id;
+  if (!id) throw new WhatsAppError("WhatsApp accepted the request but returned no message id.");
+  if (caption && kind === "audio") await sendWhatsAppText(to, caption).catch(() => null);
+  return { id, raw: data };
+}
+
 export function webhookUrl(origin: string): string {
   const base = (process.env.APP_URL || origin).replace(/\/$/, "");
   return `${base}/api/webhooks/whatsapp?key=${encodeURIComponent(process.env.WHATSAPP_WEBHOOK_KEY ?? "")}`;

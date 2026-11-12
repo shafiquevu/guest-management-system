@@ -93,3 +93,26 @@ test("photos, voice notes and documents carry their media id for download", () =
     undefined,
   ]);
 });
+
+import { attachmentBody, checkAttachment, mediaKind, safeFileName } from "../src/lib/whatsapp/media.ts";
+
+test("attachments are sent as the right WhatsApp type", () => {
+  assert.equal(mediaKind("image/jpeg"), "image");
+  assert.equal(mediaKind("image/heic"), "document"); // WhatsApp only takes JPEG/PNG photos
+  assert.equal(mediaKind("video/mp4"), "video");
+  assert.equal(mediaKind("audio/ogg; codecs=opus"), "audio");
+  assert.equal(mediaKind("application/pdf"), "document");
+});
+
+test("WhatsApp size limits are explained in plain words", () => {
+  assert.equal(checkAttachment({ name: "a.jpg", type: "image/jpeg", size: 2_000_000 }), null);
+  assert.match(checkAttachment({ name: "a.jpg", type: "image/jpeg", size: 6 * 1024 * 1024 }) ?? "", /Photos can be up to 5 MB/);
+  assert.match(checkAttachment({ name: "a.pdf", type: "application/pdf", size: 25 * 1024 * 1024 }) ?? "", /Files can be up to 20 MB/);
+  assert.equal(checkAttachment({ name: "", type: "", size: 0 }), "That file is empty.");
+});
+
+test("sent attachments read like received ones in the thread", () => {
+  assert.equal(attachmentBody("image", "x.jpg", "the door"), "📷 Photo\nthe door");
+  assert.equal(attachmentBody("document", "invoice.pdf", ""), "📎 Document (invoice.pdf)");
+  assert.equal(safeFileName("../my <invoice>.pdf"), "my invoice.pdf");
+});
