@@ -36,6 +36,9 @@ export async function ensureGmailWatch(force = false): Promise<WatchResult> {
   const metadata = (row?.metadata ?? {}) as Record<string, unknown>;
   const expires = Date.parse(String(metadata.watch_expires ?? ""));
   if (!force && expires - Date.now() > RENEW_BEFORE_MS) return { ran: false, reason: "watch still valid", expires: String(metadata.watch_expires) };
+  // After a failure (e.g. the topic's permissions aren't set up), try again once a day, not every run.
+  const failedAt = Date.parse(String(metadata.watch_failed_at ?? ""));
+  if (!force && Date.now() - failedAt < RENEW_BEFORE_MS) return { ran: false, reason: `waiting after error: ${metadata.watch_error}` };
 
   try {
     const res = await gmail<{ historyId: string; expiration: string }>(conn, "/watch", {
@@ -45,12 +48,15 @@ export async function ensureGmailWatch(force = false): Promise<WatchResult> {
     const at = new Date(Number(res.expiration)).toISOString();
     await db
       .from("channel_connections")
-      .update({ metadata: { ...metadata, watch_expires: at, watch_error: null } })
+      .update({ metadata: { ...metadata, watch_expires: at, watch_error: null, watch_failed_at: null } })
       .eq("id", conn.id);
     return { ran: true, expires: at };
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e);
-    await db.from("channel_connections").update({ metadata: { ...metadata, watch_error: reason } }).eq("id", conn.id);
+    await db
+      .from("channel_connections")
+      .update({ metadata: { ...metadata, watch_error: reason, watch_failed_at: new Date().toISOString() } })
+      .eq("id", conn.id);
     return { ran: false, reason };
   }
 }

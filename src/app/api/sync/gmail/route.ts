@@ -8,16 +8,16 @@ import { syncGmail } from "@/lib/sync/gmail";
 export const maxDuration = 60;
 
 /** Below this, a second check is skipped: several open tabs plus n8n must not hammer Gmail. */
-const MIN_GAP_MS = 20_000;
+const MIN_GAP_MS = 8_000;
 
 /**
  * Pull new guest emails only (quick; Beds24 stays on its 5-minute schedule).
  *
  * Called by:
- *   - the n8n schedule every minute, with header x-sync-secret: SYNC_SECRET
- *   - the inbox page every 30 seconds while someone has it open (any staff)
+ *   - the inbox page every 10 seconds while someone has it open (any staff)
+ *   - optionally a schedule, with header x-sync-secret: SYNC_SECRET
  *
- * Whichever comes first does the work; calls within 20 seconds of the last
+ * Whichever comes first does the work; calls within 8 seconds of the last
  * check are answered without contacting Gmail. The inbox updates itself
  * (realtime) when new emails are written.
  */

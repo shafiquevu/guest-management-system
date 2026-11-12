@@ -141,15 +141,15 @@ export function Inbox() {
     };
   }, [supabase, load]);
 
-  // Guest emails: Gmail doesn't push, so check every 30 seconds while the inbox
-  // is open and visible (the server skips it if anyone checked in the last 20s).
+  // Guest emails: Gmail doesn't push, so check every 10 seconds while the inbox
+  // is open and visible (the server skips it if anyone checked in the last 8s).
   // New emails arrive through the realtime subscription above.
   useEffect(() => {
     const check = () => {
       if (document.visibilityState === "visible") void api("/api/sync/gmail", { json: {} });
     };
     check();
-    const every = setInterval(check, 30_000);
+    const every = setInterval(check, 10_000);
     document.addEventListener("visibilitychange", check);
     return () => {
       clearInterval(every);
