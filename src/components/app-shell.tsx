@@ -12,6 +12,7 @@ import {
   LayoutDashboard,
   LogOut,
   Settings as SettingsIcon,
+  Wallet,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Avatar, cx } from "@/components/ui";
@@ -178,13 +179,15 @@ export function AppShell({ children }: { children: ReactNode }) {
     { href: "/tasks", label: "Tasks", icon: CheckSquare, count: counts.tasks },
     { href: "/properties", label: "Properties", icon: Building2 },
     { href: "/faq", label: "Saved replies", icon: BookOpen },
+    // Money is for admins, managers and read-only (owner) logins, not agents.
+    ...(profile.role !== "agent" ? [{ href: "/finance", label: "Finance", icon: Wallet }] : []),
     { href: "/settings", label: "Settings", icon: SettingsIcon },
   ];
 
   return (
     <AppContext value={value}>
-      <div className="fixed inset-0 flex overflow-hidden">
-        <aside className="flex w-60 shrink-0 flex-col border-r border-slate-200 bg-white max-md:w-16">
+      <div className="fixed inset-0 flex overflow-hidden print:static print:block print:overflow-visible">
+        <aside className="flex w-60 shrink-0 flex-col border-r border-slate-200 bg-white max-md:w-16 print:hidden">
           <div className="flex h-14 items-center gap-2.5 border-b border-slate-100 px-4">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-sm font-bold text-white">G</span>
             <span className="font-semibold tracking-tight text-slate-900 max-md:hidden">Guest Inbox</span>
@@ -237,7 +240,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
         </aside>
-        <main className="relative min-w-0 flex-1 overflow-hidden">{children}</main>
+        <main className="relative min-w-0 flex-1 overflow-hidden print:overflow-visible">{children}</main>
       </div>
     </AppContext>
   );

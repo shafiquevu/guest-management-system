@@ -136,7 +136,7 @@ async function fetchBookings(ids: number[]): Promise<Beds24Booking[]> {
 }
 
 /** Beds24 property id -> our property uuid, creating any we have not seen. */
-async function ensureProperties(orgId: string, beds24Ids: number[]): Promise<Map<number, string>> {
+export async function ensureProperties(orgId: string, beds24Ids: number[]): Promise<Map<number, string>> {
   const db = supabaseAdmin();
   const map = new Map<number, string>();
   if (!beds24Ids.length) return map;
