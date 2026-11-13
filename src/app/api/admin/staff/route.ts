@@ -7,7 +7,8 @@ const ROLES: Role[] = ["admin", "manager", "agent", "read_only"];
  * Staff accounts. Admin only.
  *
  * POST  { email, fullName, role, password, propertyIds? }  create a login
- * PATCH { id, role?, active?, fullName?, propertyIds? }    change one
+ * PATCH { id, role?, active?, fullName?, email?, password?, propertyIds? }  change one
+ * DELETE { id }                                              remove one
  *
  * The admin sets a first password and passes it on; the staff member can
  * change it after signing in. propertyIds limits what an agent sees.
@@ -88,12 +89,80 @@ export async function PATCH(request: Request) {
     if (input?.active !== undefined) changes.active = Boolean(input.active);
     if (input?.fullName) changes.full_name = String(input.fullName).trim();
 
+    // Login details live in Supabase Auth; the profile keeps a copy of the email.
+    const authChanges: Record<string, unknown> = {};
+    if (input?.email !== undefined) {
+      const email = String(input.email).trim().toLowerCase();
+      if (!email.includes("@")) return Response.json({ error: "Enter a valid email." }, { status: 400 });
+      authChanges.email = email;
+      authChanges.email_confirm = true;
+      changes.email = email;
+    }
+    if (input?.password) {
+      if (String(input.password).length < 10) {
+        return Response.json({ error: "Use a password of at least 10 characters." }, { status: 400 });
+      }
+      authChanges.password = String(input.password);
+    }
+    // An inactive person must not be able to sign in, not just be hidden.
+    if (input?.active !== undefined) authChanges.ban_duration = input.active ? "none" : "876000h";
+    if (Object.keys(authChanges).length) {
+      const { error: authError } = await db.auth.admin.updateUserById(id, authChanges);
+      if (authError) return Response.json({ error: authError.message }, { status: 400 });
+    }
+
     const { error } = await db.from("profiles").update(changes).eq("id", id);
     if (error) return Response.json({ error: error.message }, { status: 400 });
 
     if (Array.isArray(input?.propertyIds)) await setProperties(id, input.propertyIds, admin.organizationId);
-    await audit(admin.organizationId, admin.id, "staff_updated", id, changes);
+    // Never log the password itself, only that it changed.
+    await audit(admin.organizationId, admin.id, "staff_updated", id, { ...changes, password_changed: Boolean(authChanges.password) });
     return Response.json({ ok: true });
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+/**
+ * Remove a staff member. Someone with no history is deleted outright. Someone
+ * whose name is on messages, tasks or logs can't be deleted without breaking
+ * that history, so their login is blocked and they are marked inactive (they
+ * can be restored later).
+ */
+export async function DELETE(request: Request) {
+  try {
+    const admin = await requireStaff(request, ["admin"]);
+    const input = await request.json().catch(() => ({}));
+    const id = String(input?.id ?? "");
+    if (id === admin.id) return Response.json({ error: "You cannot remove yourself." }, { status: 400 });
+    const db = supabaseAdmin();
+
+    const { data: profile } = await db
+      .from("profiles")
+      .select("id, organization_id, email")
+      .eq("id", id)
+      .single();
+    if (!profile || profile.organization_id !== admin.organizationId) {
+      return Response.json({ error: "Staff member not found." }, { status: 404 });
+    }
+
+    await db.from("property_staff").delete().eq("profile_id", id);
+    const { error: delError } = await db.from("profiles").delete().eq("id", id);
+    if (!delError) {
+      await db.auth.admin.deleteUser(id);
+      await audit(admin.organizationId, admin.id, "staff_deleted", id, { email: profile.email });
+      return Response.json({ ok: true, removed: "deleted" });
+    }
+
+    // Has history (foreign keys point at them): block the login instead.
+    const { error } = await db
+      .from("profiles")
+      .update({ active: false, updated_at: new Date().toISOString() })
+      .eq("id", id);
+    if (error) return Response.json({ error: error.message }, { status: 400 });
+    await db.auth.admin.updateUserById(id, { ban_duration: "876000h" });
+    await audit(admin.organizationId, admin.id, "staff_deactivated", id, { email: profile.email });
+    return Response.json({ ok: true, removed: "deactivated" });
   } catch (error) {
     return errorResponse(error);
   }
