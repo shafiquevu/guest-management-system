@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Camera, KeyRound, Mail, Pencil, RefreshCw, RotateCcw, Trash2, UserPlus } from "lucide-react";
 import { useApp, type Role } from "@/components/app-shell";
 import { Avatar, btn, Card, Chip, cx, field, PageHeader } from "@/components/ui";
@@ -288,26 +288,15 @@ export function SettingsPanel() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {staff.filter((x) => x.active).map((s) => (
-                    <tr key={s.id} className="align-top">
+                    <Fragment key={s.id}>
+                    <tr className={cx("align-top", editing?.id === s.id && "bg-indigo-50/40")}>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2.5">
                           <PhotoPicker name={s.full_name} src={s.avatar_url} onPick={(file) => setPhoto(s.id, file)} />
-                          {editing?.id === s.id ? (
-                            <form onSubmit={saveEdit} className="grid gap-1.5">
-                              <input required value={editing.fullName} onChange={(e) => setEditing({ ...editing, fullName: e.target.value })} className={cx(field, "py-1.5 text-xs")} aria-label="Full name" placeholder="Full name" />
-                              <input required type="email" value={editing.email} onChange={(e) => setEditing({ ...editing, email: e.target.value })} className={cx(field, "py-1.5 text-xs")} aria-label="Email" placeholder="Email" />
-                              <input minLength={10} value={editing.password} onChange={(e) => setEditing({ ...editing, password: e.target.value })} className={cx(field, "py-1.5 text-xs")} aria-label="New password" placeholder="New password (blank = keep)" />
-                              <div className="flex gap-1.5">
-                                <button className={cx(btn.primary, "px-2.5 py-1 text-xs")}>Save</button>
-                                <button type="button" onClick={() => setEditing(null)} className={cx(btn.secondary, "px-2.5 py-1 text-xs")}>Cancel</button>
-                              </div>
-                            </form>
-                          ) : (
-                            <div>
-                              <p className="font-medium text-slate-900">{s.full_name}</p>
-                              <p className="text-xs text-slate-500">{s.email}</p>
-                            </div>
-                          )}
+                          <div>
+                            <p className="font-medium text-slate-900">{s.full_name}</p>
+                            <p className="text-xs text-slate-500">{s.email}</p>
+                          </div>
                         </div>
                       </td>
                       <td className="px-4 py-3">
@@ -364,6 +353,34 @@ export function SettingsPanel() {
                         </div>
                       </td>
                     </tr>
+                    {editing?.id === s.id && (
+                      <tr className="bg-indigo-50/40">
+                        <td colSpan={4} className="px-4 pb-4 pt-0">
+                          <form onSubmit={saveEdit} className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
+                            <p className="mb-3 text-sm font-semibold text-slate-900">Edit {s.full_name}</p>
+                            <div className="grid gap-3 sm:grid-cols-3">
+                              <label className="block">
+                                <span className="mb-1 block text-xs font-medium text-slate-600">Full name</span>
+                                <input required value={editing.fullName} onChange={(e) => setEditing({ ...editing, fullName: e.target.value })} className={field} />
+                              </label>
+                              <label className="block">
+                                <span className="mb-1 block text-xs font-medium text-slate-600">Email (used to sign in)</span>
+                                <input required type="email" value={editing.email} onChange={(e) => setEditing({ ...editing, email: e.target.value })} className={field} />
+                              </label>
+                              <label className="block">
+                                <span className="mb-1 block text-xs font-medium text-slate-600">New password</span>
+                                <input type="text" minLength={10} autoComplete="new-password" value={editing.password} onChange={(e) => setEditing({ ...editing, password: e.target.value })} className={field} placeholder="Leave blank to keep" />
+                              </label>
+                            </div>
+                            <div className="mt-4 flex items-center justify-end gap-2">
+                              <button type="button" onClick={() => setEditing(null)} className={btn.secondary}>Cancel</button>
+                              <button className={btn.primary}>Save changes</button>
+                            </div>
+                          </form>
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
