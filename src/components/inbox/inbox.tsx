@@ -62,6 +62,7 @@ export function Inbox() {
   // "" or the id of a staff member who has replied in the thread.
   const [repliedBy, setRepliedBy] = useState("");
   const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<"newest" | "urgent">("newest");
 
   const load = useCallback(async () => {
     let query = supabase
@@ -194,9 +195,10 @@ export function Inbox() {
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
-    // Escalated, then urgent, float to the top of the open lists; the rest stay newest first.
+    // Newest first by default: urgent-first buried new messages under old flagged
+    // chats, which looked like "messages not syncing". Urgent first is a choice.
     const rank = (c: ConversationRow) =>
-      !ACTIVE.includes(c.status) ? 2 : c.status === "escalated" ? 0 : c.ai_priority === "urgent" ? 1 : 2;
+      sort !== "urgent" || !ACTIVE.includes(c.status) ? 2 : c.status === "escalated" ? 0 : c.ai_priority === "urgent" ? 1 : 2;
     return conversations
       .filter((c) => {
         if (!inTab(c, tab)) return false;
@@ -206,7 +208,7 @@ export function Inbox() {
           .some((v) => String(v).toLowerCase().includes(q));
       })
       .sort((a, b) => rank(a) - rank(b));
-  }, [conversations, search, tab, inTab]);
+  }, [conversations, search, tab, inTab, sort]);
 
   const selected = conversations.find((c) => c.id === selectedId) ?? null;
   const assignedTo = (id: string | null) => staff.find((s) => s.id === id);
@@ -289,6 +291,10 @@ export function Inbox() {
               {properties.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
+            </select>
+            <select value={sort} onChange={(e) => setSort(e.target.value as "newest" | "urgent")} className={cx(field, "col-span-2 py-1.5 text-xs")} aria-label="Sort">
+              <option value="newest">Sort: newest message first</option>
+              <option value="urgent">Sort: escalated &amp; urgent first</option>
             </select>
           </div>
         </div>
