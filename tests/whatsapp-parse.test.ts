@@ -137,3 +137,24 @@ test("replies carry the quoted message id, reactions attach to their message", (
   );
   assert.deepEqual(echoes, [{ kind: "reaction", target: "wamid.R", emoji: "", by: "team", guest: "447700900222" }]);
 });
+
+test("a guest's edit changes the original message instead of adding an '(edit)' bubble", () => {
+  const events = parseWebhook(
+    wrap("messages", {
+      messages: [{
+        from: "447700900222", id: "wamid.E", timestamp: "1762950100", type: "edit",
+        edit: { original_message_id: "wamid.A", message: { type: "text", text: { body: "Check-in at 3pm please" } } },
+      }],
+    }),
+  );
+  assert.deepEqual(events, [{ kind: "change", target: "wamid.A", text: "Check-in at 3pm please", guest: "447700900222" }]);
+});
+
+test("a deleted message is marked, not added", () => {
+  const events = parseWebhook(
+    wrap("messages", {
+      messages: [{ from: "447700900222", id: "wamid.R", timestamp: "1762950200", type: "revoke", revoke: { original_message_id: "wamid.A" } }],
+    }),
+  );
+  assert.deepEqual(events, [{ kind: "change", target: "wamid.A", text: null, guest: "447700900222" }]);
+});

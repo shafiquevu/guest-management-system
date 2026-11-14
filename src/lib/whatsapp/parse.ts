@@ -47,7 +47,31 @@ export type WaStatus = {
   error: string | null;
 };
 
-export type WaEvent = WaMessage | WaStatus | WaReaction;
+/**
+ * The guest (or the team on the phone app) edited or deleted an earlier
+ * message. Shown on that message, never as a bubble of its own.
+ * `text` is the new text for an edit; null for a delete (revoke).
+ */
+export type WaChange = {
+  kind: "change";
+  target: string;
+  text: string | null;
+  guest: string;
+};
+
+export type WaEvent = WaMessage | WaStatus | WaReaction | WaChange;
+
+/** Meta: type "edit" -> edit.{original_message_id, message}; type "revoke" -> revoke.original_message_id. */
+function changeOf(m: any, guest: string): WaChange | null {
+  if (m?.type !== "edit" && m?.type !== "revoke") return null;
+  const box = m[m.type] ?? {};
+  const target = box.original_message_id ?? box.message_id ?? m.context?.id;
+  if (!target) return null;
+  if (m.type === "revoke") return { kind: "change", target: String(target), text: null, guest };
+  const inner = box.message ?? {};
+  const text = messageText({ ...inner, type: inner.type ?? (inner.text ? "text" : "") });
+  return { kind: "change", target: String(target), text, guest };
+}
 
 const MEDIA_LABEL: Record<string, string> = {
   image: "📷 Photo",
@@ -124,6 +148,11 @@ export function parseWebhook(body: any): WaEvent[] {
             events.push({ kind: "reaction", target: String(m.reaction.message_id), emoji: String(m.reaction.emoji ?? ""), by: "guest", guest });
             continue;
           }
+          const change = changeOf(m, guest);
+          if (change) {
+            events.push(change);
+            continue;
+          }
           events.push({
             kind: "message",
             id: String(m.id),
@@ -154,6 +183,11 @@ export function parseWebhook(body: any): WaEvent[] {
           const guest = digits(m.to);
           if (m.type === "reaction" && m.reaction?.message_id) {
             events.push({ kind: "reaction", target: String(m.reaction.message_id), emoji: String(m.reaction.emoji ?? ""), by: "team", guest });
+            continue;
+          }
+          const change = changeOf(m, guest);
+          if (change) {
+            events.push(change);
             continue;
           }
           events.push({

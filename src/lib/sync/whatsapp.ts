@@ -4,7 +4,7 @@ import { BUCKET, ensureBucket } from "@/lib/attachments";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { refreshConversation } from "@/lib/sync/beds24";
 import { downloadMedia } from "@/lib/whatsapp/client";
-import type { WaEvent, WaMessage, WaReaction, WaStatus } from "@/lib/whatsapp/parse";
+import type { WaChange, WaEvent, WaMessage, WaReaction, WaStatus } from "@/lib/whatsapp/parse";
 
 /**
  * WhatsApp webhook events -> Supabase.
@@ -56,6 +56,9 @@ export async function ingestWhatsApp(events: WaEvent[]): Promise<WaReport> {
   // After the messages, so a reaction to a message in the same delivery finds it.
   for (const r of events.filter((e): e is WaReaction => e.kind === "reaction")) {
     if (await applyReaction(conn.organization_id, r)) report.reactionsApplied++;
+  }
+  for (const c of events.filter((e): e is WaChange => e.kind === "change")) {
+    await applyChange(conn.organization_id, c);
   }
 
   const business = messages.find((m) => m.businessNumber)?.businessNumber;
@@ -290,5 +293,30 @@ export async function applyReaction(orgId: string, r: Pick<WaReaction, "target" 
   if (r.emoji) reactions[r.by] = r.emoji;
   else delete reactions[r.by];
   await db.from("messages").update({ raw_payload: { ...raw, reactions } }).eq("id", msg.id);
+  return true;
+}
+
+/**
+ * An edit replaces the message's text (the first version is kept in
+ * raw_payload.original_body); a delete marks it deleted. Either way it stays
+ * one bubble, labelled "edited" / "deleted".
+ */
+export async function applyChange(orgId: string, c: Pick<WaChange, "target" | "text">): Promise<boolean> {
+  const db = supabaseAdmin();
+  const { data: msg } = await db
+    .from("messages")
+    .select("id, body, raw_payload")
+    .eq("organization_id", orgId)
+    .eq("channel", "whatsapp")
+    .eq("external_message_id", `whatsapp:${c.target}`)
+    .maybeSingle();
+  if (!msg) return false;
+  const raw = (msg.raw_payload ?? {}) as Record<string, unknown>;
+  const original = raw.original_body ?? msg.body;
+  if (c.text === null) {
+    await db.from("messages").update({ raw_payload: { ...raw, original_body: original, deleted: true } }).eq("id", msg.id);
+  } else if (c.text) {
+    await db.from("messages").update({ body: c.text, raw_payload: { ...raw, original_body: original, edited: true } }).eq("id", msg.id);
+  }
   return true;
 }

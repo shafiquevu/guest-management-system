@@ -22,7 +22,13 @@ type Message = {
   sent_at: string | null;
   created_at: string;
   external_message_id: string | null;
-  raw_payload: { reply_to?: string; reactions?: Record<string, string> } | null;
+  raw_payload: {
+    reply_to?: string;
+    reactions?: Record<string, string>;
+    edited?: boolean;
+    deleted?: boolean;
+    original_body?: string;
+  } | null;
 };
 
 /** WhatsApp's quick reactions. */
@@ -484,7 +490,17 @@ export function Thread({
                         files={files}
                       />
                     )}
-                    <MessageBody body={m.body} stored={photos[m.id]} files={files[m.id]} onOpen={openPhoto} />
+                    <div className={cx(m.raw_payload?.deleted && "line-through opacity-60")}>
+                      <MessageBody body={m.body} stored={photos[m.id]} files={files[m.id]} onOpen={openPhoto} />
+                    </div>
+                    {(m.raw_payload?.edited || m.raw_payload?.deleted) && (
+                      <p
+                        className={cx("mt-0.5 text-[11px] italic", m.direction === "outbound" ? "text-indigo-200" : "text-slate-400", hasPhotos(m) && "px-3.5 pb-2")}
+                        title={m.raw_payload?.original_body && m.raw_payload.original_body !== m.body ? `First version: ${m.raw_payload.original_body}` : undefined}
+                      >
+                        {m.raw_payload?.deleted ? "Deleted on WhatsApp" : "Edited"}
+                      </p>
+                    )}
                   </div>
                   {m.raw_payload?.reactions && Object.keys(m.raw_payload.reactions).length > 0 && (
                     <div className={cx("-mt-2 flex px-2", m.direction === "outbound" ? "justify-end" : "justify-start")}>
