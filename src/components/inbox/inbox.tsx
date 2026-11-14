@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Inbox as InboxIcon, MessageSquareText, Search, Timer } from "lucide-react";
+import { Inbox as InboxIcon, MessageSquareText, RefreshCw, Search, Timer } from "lucide-react";
 import { useApp } from "@/components/app-shell";
 import { brandOf } from "@/components/channel-logo";
 import { Avatar, Chip, cx, EmptyState, field, GuestAvatar, Tabs } from "@/components/ui";
@@ -158,6 +158,25 @@ export function Inbox() {
     };
   }, [api]);
 
+  // "Sync now": email + Beds24 straight away, instead of waiting for the schedule.
+  // WhatsApp needs no sync -- it arrives the moment it is sent.
+  const [syncing, setSyncing] = useState(false);
+  const [syncNote, setSyncNote] = useState<{ ok: boolean; text: string } | null>(null);
+  async function syncNow() {
+    setSyncing(true);
+    setSyncNote(null);
+    const res = await api("/api/sync/beds24", { json: { maxAgeDays: 3 } });
+    setSyncing(false);
+    const added = res.data?.messagesAdded ?? 0;
+    setSyncNote(
+      res.ok
+        ? { ok: true, text: added ? `Synced: ${added} new message${added === 1 ? "" : "s"}.` : "Synced: everything is up to date." }
+        : { ok: false, text: `Sync problem: ${res.data?.error ?? res.data?.errors?.[0] ?? res.status}` },
+    );
+    load();
+    setTimeout(() => setSyncNote(null), 6000);
+  }
+
   const inTab = useCallback((c: ConversationRow, key: TabKey) => {
     if (key === "all") return true;
     if (key === "resolved") return c.status === "resolved" || c.status === "archived";
@@ -201,10 +220,29 @@ export function Inbox() {
       {/* ── list ── */}
       <section className="flex min-h-0 flex-col border-r border-slate-200 bg-white">
         <div className="space-y-3 border-b border-slate-100 p-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <h1 className="text-lg font-semibold tracking-tight text-slate-900">Inbox</h1>
-            <span className="text-xs text-slate-500">{visible.length} conversations</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500">{visible.length} conversations</span>
+              {profile.role !== "read_only" && (
+                <button
+                  type="button"
+                  onClick={syncNow}
+                  disabled={syncing}
+                  title="Check email and Beds24 for new messages now"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                >
+                  <RefreshCw className={cx("h-3.5 w-3.5", syncing && "animate-spin")} />
+                  {syncing ? "Syncing…" : "Sync now"}
+                </button>
+              )}
+            </div>
           </div>
+          {syncNote && (
+            <p className={cx("rounded-lg px-3 py-1.5 text-xs", syncNote.ok ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700")}>
+              {syncNote.text}
+            </p>
+          )}
           <div className="relative">
             <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input

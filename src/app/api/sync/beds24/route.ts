@@ -20,9 +20,11 @@ export const maxDuration = 60;
 export async function POST(request: Request) {
   try {
     const fromSchedule = secretMatches(request.headers.get("x-sync-secret"), process.env.SYNC_SECRET);
-    if (!fromSchedule) await requireStaff(request, ["admin", "manager"]);
+    // Agents work the inbox, so they can press Sync too; the 30-day backfill stays admin/manager.
+    const staff = fromSchedule ? null : await requireStaff(request, ["admin", "manager", "agent"]);
     const body = await request.json().catch(() => ({}));
-    const maxAgeDays = Number(body?.maxAgeDays) || 3;
+    const asked = Number(body?.maxAgeDays) || 3;
+    const maxAgeDays = staff && staff.role === "agent" ? Math.min(asked, 3) : asked;
 
     // The same schedule keeps both channels current; one failing never stops the other.
     const [beds24, gmail] = await Promise.all([
