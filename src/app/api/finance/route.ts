@@ -1,6 +1,6 @@
 import { connection } from "next/server";
 import { errorResponse, requireStaff } from "@/lib/auth/staff";
-import { isConfigured } from "@/lib/beds24/client";
+import { ledgerConfigured } from "@/lib/ledger";
 import { buildFinanceReport } from "@/lib/finance";
 
 export const maxDuration = 60;
@@ -13,8 +13,8 @@ export async function GET(request: Request) {
   await connection(); // per request, never prerendered
   try {
     const staff = await requireStaff(request, ["admin", "manager", "read_only"]);
-    if (!isConfigured()) {
-      return Response.json({ error: "Beds24 is not connected, so there are no bookings to report on." }, { status: 503 });
+    if (!ledgerConfigured()) {
+      return Response.json({ error: "GH Ledger is not connected yet, so there is no finance data to report on." }, { status: 503 });
     }
     const month = new URL(request.url).searchParams.get("month") ?? new Date().toISOString().slice(0, 7);
     try {

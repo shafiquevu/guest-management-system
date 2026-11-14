@@ -1,14 +1,14 @@
 import { errorResponse, requireStaff } from "@/lib/auth/staff";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { ensureProperties } from "@/lib/sync/beds24";
+import { EXPENSE_PROPERTY_PREFIX } from "@/lib/finance";
 
 /**
- * POST   { propertyId?, label, category?, amount, date, supplier? }  add an expense
- * DELETE { id }                                                     remove one
+ * POST   { property?, label, category?, amount, date, supplier? }  add an expense
+ * DELETE { id }                                                   remove one
  *
- * propertyId is the Beds24 property id (what the report shows); it is mapped to
- * our own property row, creating it if this is the first time we see it. No
- * propertyId means a general cost, counted in the totals only.
+ * `property` is the GH Ledger property name (what the report shows), kept in
+ * the notes as "Property: <name>". No property means a general cost, counted
+ * in the totals only.
  */
 export async function POST(request: Request) {
   try {
@@ -21,16 +21,12 @@ export async function POST(request: Request) {
     if (!Number.isFinite(amount) || amount <= 0) return Response.json({ error: "Enter an amount above zero." }, { status: 400 });
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return Response.json({ error: "Pick a date." }, { status: 400 });
 
-    let propertyId: string | null = null;
-    if (input?.propertyId) {
-      const map = await ensureProperties(staff.organizationId, [Number(input.propertyId)]);
-      propertyId = map.get(Number(input.propertyId)) ?? null;
-      if (!propertyId) return Response.json({ error: "Unknown property." }, { status: 400 });
-    }
+    const property = String(input?.property ?? "").trim();
 
     const { error } = await supabaseAdmin().from("property_expenses").insert({
       organization_id: staff.organizationId,
-      property_id: propertyId,
+      property_id: null,
+      notes: property ? `${EXPENSE_PROPERTY_PREFIX}${property}` : null,
       label,
       category: input?.category ? String(input.category) : null,
       amount: Math.round(amount * 100) / 100,
