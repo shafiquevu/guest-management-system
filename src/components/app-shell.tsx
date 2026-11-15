@@ -5,6 +5,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { createContext, use, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import {
+  AlertTriangle,
+  BarChart3,
   BookOpen,
   Building2,
   CheckSquare,
@@ -183,6 +185,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     // Money is for admins, managers and read-only (owner) logins, not agents.
     ...(profile.role !== "agent"
       ? [
+          { href: "/incidents", label: "Incidents", icon: AlertTriangle },
+          { href: "/reports", label: "Reports", icon: BarChart3 },
           { href: "/finance", label: "Finance", icon: Wallet },
           { href: "/invoices", label: "Invoices", icon: FileText },
         ]

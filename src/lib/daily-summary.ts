@@ -2,7 +2,9 @@ import "server-only";
 
 import { averageReplyMinutes, awaitingReply, CHANNEL_LABEL, minutesLabel, type ReplyMsg } from "@/lib/format";
 import { button, emailLayout, esc, sectionTitle } from "@/lib/email-layout";
-import { supabaseAdmin } from "@/lib/supabase/admin";
+import { organizationId, supabaseAdmin } from "@/lib/supabase/admin";
+import { buildPeriodReport, type PeriodReport } from "@/lib/reports";
+import { OUTSIDE_APP } from "@/lib/reply-stats";
 
 /**
  * The morning email for managers, sent by n8n once a day: the last 24 hours,
@@ -78,9 +80,31 @@ export async function dailySummary() {
     [x.guest?.full_name ?? "Guest", x.property?.name].filter(Boolean).join(" · ");
   const waited = (c: Conv) => minutesLabel((now.getTime() - Date.parse(c.last_inbound_at!)) / 60_000);
 
-  const subject = `Daily summary: ${waiting.length} waiting for a reply, ${arrivals.length} arrival${arrivals.length === 1 ? "" : "s"} today`;
+  // Monday's email also carries the weekly report (last 7 days), so no extra
+  // n8n schedule is needed. A failure here never blocks the daily email.
+  const isMonday = new Date(now).toLocaleDateString("en-GB", { weekday: "long", timeZone: "Europe/London" }) === "Monday";
+  let week: PeriodReport | null = null;
+  if (isMonday) {
+    try {
+      week = await buildPeriodReport(await organizationId(), 7, now);
+    } catch (e) {
+      console.error("weekly report failed", e);
+    }
+  }
+  const weekLines = week
+    ? [
+        `Guest messages: ${week.guestMessages} · replies: ${week.replies} · conversations: ${week.conversations}`,
+        `Average first reply: ${minutesLabel(week.avgMinutes)} (median ${minutesLabel(week.medianMinutes)}), ${week.withinHour === null ? "–" : `${Math.round(week.withinHour * 100)}%`} answered within an hour`,
+        `Incidents: ${week.incidents.opened} opened, ${week.incidents.resolved} resolved, ${week.incidents.open} still open`,
+        ...week.byChannel.slice(0, 5).map((b) => `${CHANNEL_LABEL[b.key] ?? b.key}: ${b.replies} replies, average ${minutesLabel(b.avgMinutes)}`),
+        ...week.byStaff.filter((b) => b.key !== OUTSIDE_APP).slice(0, 8).map((b) => `${b.key}: ${b.replies} replies, average ${minutesLabel(b.avgMinutes)}`),
+      ]
+    : [];
+
+  const subject = `${week ? "Weekly report + daily" : "Daily"} summary: ${waiting.length} waiting for a reply, ${arrivals.length} arrival${arrivals.length === 1 ? "" : "s"} today`;
 
   const sections: [string, string[]][] = [
+    ...(week ? ([["Last 7 days (weekly report)", weekLines]] as [string, string[]][]) : []),
     [
       "Last 24 hours",
       [
@@ -134,6 +158,19 @@ export async function dailySummary() {
     subheading: new Date(now).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "Europe/London" }),
     preheader: subject,
     body: `
+      ${
+        week
+          ? `${sectionTitle("Last 7 days · weekly report", "#4338ca")}
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 -4px 10px"><tr>
+        ${tile(week.guestMessages, "Guest messages")}
+        ${tile(minutesLabel(week.avgMinutes), "Average first reply")}
+        ${tile(week.withinHour === null ? "–" : `${Math.round(week.withinHour * 100)}%`, "Answered within 1 h")}
+        ${tile(week.incidents.opened, "Incidents opened", week.incidents.opened ? "#b91c1c" : "#0f172a")}
+      </tr></table>
+      ${list(weekLines.slice(3).map((l) => row(l)), "No replies this week.")}
+      ${appUrl ? `<div style="margin:0 0 18px">${button(`${appUrl}/reports`, "Open the full report")}</div>` : ""}`
+          : ""
+      }
       ${sectionTitle("Last 24 hours")}
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 -4px 18px"><tr>
         ${tile(received, "Guest messages")}
@@ -167,7 +204,7 @@ export async function dailySummary() {
       )}
 
       ${appUrl ? `<div style="margin:4px 0 12px">${button(`${appUrl}/dashboard`, "Open the dashboard")}</div>` : ""}`,
-    footer: "Sent every morning at 8:00 to admins and managers.",
+    footer: "Sent every morning at 8:00 to admins and managers. Monday's email includes the weekly report.",
   });
 
   return { to: to.join(","), subject, text, html };
