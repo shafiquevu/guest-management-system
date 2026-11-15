@@ -8,6 +8,7 @@ import {
   BookOpen,
   Building2,
   CheckSquare,
+  FileText,
   Inbox as InboxIcon,
   LayoutDashboard,
   LogOut,
@@ -180,7 +181,12 @@ export function AppShell({ children }: { children: ReactNode }) {
     { href: "/properties", label: "Properties", icon: Building2 },
     { href: "/faq", label: "Saved replies", icon: BookOpen },
     // Money is for admins, managers and read-only (owner) logins, not agents.
-    ...(profile.role !== "agent" ? [{ href: "/finance", label: "Finance", icon: Wallet }] : []),
+    ...(profile.role !== "agent"
+      ? [
+          { href: "/finance", label: "Finance", icon: Wallet },
+          { href: "/invoices", label: "Invoices", icon: FileText },
+        ]
+      : []),
     { href: "/settings", label: "Settings", icon: SettingsIcon },
   ];
 
