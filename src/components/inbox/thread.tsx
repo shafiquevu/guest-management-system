@@ -851,20 +851,54 @@ function DeliveryIcon({ status }: { status: Message["status"] }) {
 }
 
 /** WhatsApp's beige chat wallpaper with a faint doodle pattern. */
-const WA_DOODLES =
-  "<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180' fill='none' stroke='#d6cdbf' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'>" +
-  "<circle cx='22' cy='24' r='8'/><path d='M18 22h.01M26 22h.01M18 28c2 2 6 2 8 0'/>" +
-  "<path d='M70 14l8 14H62z'/>" +
-  "<rect x='118' y='14' width='22' height='15' rx='3'/><path d='M118 18l11 7 11-7'/>" +
-  "<path d='M160 60c2-5 9-5 9 1 0 5-9 10-9 10s-9-5-9-10c0-6 7-6 9-1z'/>" +
-  "<path d='M30 80c6-8 14-8 20 0M34 76v-6M46 76v-6'/>" +
-  "<circle cx='100' cy='78' r='10'/><path d='M100 72v6l4 3'/>" +
-  "<path d='M14 132l10-10 10 10-10 10z'/>" +
-  "<path d='M64 128h20v16H64zM68 128v-4h12v4'/>" +
-  "<path d='M120 120l4 9 9 1-7 6 2 9-8-5-8 5 2-9-7-6 9-1z'/>" +
-  "<path d='M150 150c5-4 12 0 10 6M40 168c4-6 12-6 16 0'/>" +
-  "<circle cx='96' cy='166' r='3'/><circle cx='160' cy='110' r='2'/>" +
-  "</svg>";
+/** Small line doodles (24×24 units) scattered over the wallpaper. Our own drawings, in WhatsApp's light style. */
+const DOODLES = [
+  "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM8.5 10h.01M15.5 10h.01M8 14.5c2 2.5 6 2.5 8 0", // smiley
+  "M12 20s-7-4.5-7-9.5A4 4 0 0 1 12 8a4 4 0 0 1 7 2.5C19 15.5 12 20 12 20z", // heart
+  "M4 7h16v11H4zM4 7l8 6 8-6", // envelope
+  "M7 4h10v16H7zM11 17h2", // phone
+  "M12 3l2.6 5.6 6 .6-4.5 4 1.3 6-5.4-3.2-5.4 3.2 1.3-6-4.5-4 6-.6z", // star
+  "M5 8h3l2-3h4l2 3h3v11H5zM12 10.5a3 3 0 1 0 0 6 3 3 0 0 0 0-6z", // camera
+  "M9 18V6l10-2v12M9 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM19 16a2 2 0 1 1-4 0 2 2 0 0 1 4 0z", // music
+  "M6 18c-2 0-3-1.5-3-3.5S4.5 11 6.5 11C7 8 9 6 12 6s5 2 5.5 5c2 0 3.5 1.5 3.5 3.5S20 18 18 18z", // cloud
+  "M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z", // sun
+  "M4 14h13a3 3 0 0 0 3-3V8H4zM20 9h1a2 2 0 0 1 0 4h-1M7 18h8", // cup
+  "M3 12l8-8h6l4 4v6l-8 8zM15 8h.01", // tag
+  "M12 21s-6-6-6-11a6 6 0 0 1 12 0c0 5-6 11-6 11zM12 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4z", // pin
+  "M5 21V4M5 4h12l-2 4 2 4H5", // flag
+  "M7 10V7a5 5 0 0 1 10 0v3M5 10h14v10H5zM12 14v2", // lock
+  "M4 6h16v10H8l-4 4z", // speech bubble
+  "M12 4a4 4 0 0 0-4 4v4l-2 3h12l-2-3V8a4 4 0 0 0-4-4zM10 18a2 2 0 0 0 4 0", // bell
+  "M3 10l9-6 9 6M5 9v11h14V9M10 20v-6h4v6", // house
+  "M14 4l6 6-9 9H5v-6zM12 6l6 6", // pencil
+  "M6 4h12M6 20h12M7 4c0 5 10 5 10 8s-10 3-10 8M17 4c0 5-10 5-10 8", // hourglass
+  "M12 4l2 4h4l-3 3 1 5-4-2-4 2 1-5-3-3h4z", // small star
+  "M8 3h8l-1 7a3 3 0 0 1-6 0zM12 13v6M8 21h8", // glass
+  "M3 17l6-6 4 4 8-8M15 7h6v6", // chart
+];
+const WA_DOODLES = (() => {
+  const size = 360;
+  const step = 45;
+  // A fixed pseudo-random sequence: the same wallpaper on every load, but no visible rows.
+  let seed = 7;
+  const rand = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+  let out = "";
+  for (let y = 0; y < size; y += step) {
+    for (let x = 0; x < size; x += step) {
+      const ox = x + rand() * 22 - 6;
+      const oy = y + rand() * 22 - 6;
+      const angle = Math.round(rand() * 80 - 40);
+      const scale = (1 + rand() * 0.45).toFixed(2);
+      const d = DOODLES[Math.floor(rand() * DOODLES.length)];
+      out += `<path transform='translate(${ox.toFixed(1)} ${oy.toFixed(1)}) rotate(${angle} 12 12) scale(${scale})' d='${d}'/>`;
+      // Tiny dots and dashes in the gaps, like WhatsApp's filler.
+      const fx = (x + step * 0.75 + rand() * 6).toFixed(1);
+      const fy = (y + step * 0.8 + rand() * 6).toFixed(1);
+      out += rand() > 0.5 ? `<circle cx='${fx}' cy='${fy}' r='1.6'/>` : `<path d='M${fx} ${fy}l4 -3'/>`;
+    }
+  }
+  return `<svg xmlns='http://www.w3.org/2000/svg' width='${size}' height='${size}' fill='none' stroke='#d3c8b6' stroke-width='1.25' stroke-linecap='round' stroke-linejoin='round'>${out}</svg>`;
+})();
 const WA_WALLPAPER = `url("data:image/svg+xml,${encodeURIComponent(WA_DOODLES)}")`;
 
 /** WhatsApp ticks: one grey (sent), two grey (delivered), two blue (read). */
