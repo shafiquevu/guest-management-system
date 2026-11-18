@@ -53,7 +53,9 @@ export function EmailCard({
   onReply,
   onRetry,
   files = [],
+  onOpenPhoto,
 }: {
+  onOpenPhoto?: (url: string) => void;
   files?: { url: string; type: string; name: string }[];
   m: EmailMessage;
   name: string;
@@ -103,23 +105,49 @@ export function EmailCard({
 
       {open && (
         <div className="border-t border-slate-100 px-4 pt-3 pb-3">
-          <div className="text-sm leading-relaxed whitespace-pre-line text-slate-800 [overflow-wrap:anywhere]">{text || "(empty email)"}</div>
           {files.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {files.map((f) => (
-                <a
-                  key={f.url}
-                  href={f.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex max-w-full items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100"
-                >
-                  <Paperclip className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                  <span className="truncate">{f.name}</span>
-                </a>
-              ))}
+            // Attachments sit above the text, like an email client: photos as thumbnails, other files as cards.
+            <div className="mb-3 flex flex-wrap gap-2">
+              {files.map((f) =>
+                f.type.startsWith("image/") ? (
+                  <a
+                    key={f.url}
+                    href={f.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => {
+                      if (!onOpenPhoto) return;
+                      e.preventDefault();
+                      onOpenPhoto(f.url);
+                    }}
+                    className="block h-28 w-44 cursor-zoom-in overflow-hidden rounded-lg bg-slate-50 ring-1 ring-slate-200 hover:ring-slate-300"
+                    title="Open photo"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element -- signed storage URL */}
+                    <img src={f.url} alt="Attached photo" loading="lazy" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
+                  </a>
+                ) : (
+                  <a
+                    key={f.url}
+                    href={f.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex w-56 max-w-full items-center gap-2.5 rounded-lg bg-white px-3 py-2 ring-1 ring-slate-200 hover:bg-slate-50"
+                    title="Open file"
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-indigo-50 text-[10px] font-bold text-indigo-600 uppercase">
+                      {f.name.includes(".") ? f.name.split(".").pop()!.slice(0, 4) : <Paperclip className="h-4 w-4" />}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-slate-800">{f.name}</span>
+                      <span className="block text-xs text-slate-400">Click to open</span>
+                    </span>
+                  </a>
+                ),
+              )}
             </div>
           )}
+          <div className="text-sm leading-relaxed whitespace-pre-line text-slate-800 [overflow-wrap:anywhere]">{text || "(empty email)"}</div>
           {quoted && (
             <div className="mt-2">
               <button

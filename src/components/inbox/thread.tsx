@@ -491,9 +491,10 @@ export function Thread({
                   }
                   onRetry={canWrite ? () => retry(m.id) : undefined}
                   files={[
-                    ...(photos[m.id] ?? []).map((url, i) => ({ url, type: "image/*", name: `Photo ${i + 1}` })),
+                    ...(photos[m.id] ?? []).map((url) => ({ url, type: "image/*", name: "Photo" })),
                     ...(files[m.id] ?? []),
                   ]}
+                  onOpenPhoto={openPhoto}
                 />
               </div>
             ) : (
