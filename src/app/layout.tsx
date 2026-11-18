@@ -21,9 +21,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} h-full overflow-x-hidden antialiased print:overflow-visible`}
     >
-      <body className="min-h-full flex flex-col" suppressHydrationWarning>
+      {/* No sideways page scroll: its scrollbar showed as a white strip under the app. */}
+      <body className="min-h-full flex flex-col overflow-x-hidden print:overflow-visible" suppressHydrationWarning>
         {children}
       </body>
     </html>
