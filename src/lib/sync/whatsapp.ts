@@ -21,9 +21,9 @@ import type { WaChange, WaEvent, WaMessage, WaReaction, WaStatus } from "@/lib/w
 
 export type WaReport = { messagesAdded: number; statusesApplied: number; reactionsApplied: number; conversationsTouched: number; ignored?: string };
 
-type Connection = { id: string; organization_id: string; external_phone_number: string | null };
+export type WaConnection = { id: string; organization_id: string; external_phone_number: string | null };
 
-export async function whatsappConnection(): Promise<Connection | null> {
+export async function whatsappConnection(): Promise<WaConnection | null> {
   const { data } = await supabaseAdmin()
     .from("channel_connections")
     .select("id, organization_id, external_phone_number")
@@ -32,7 +32,7 @@ export async function whatsappConnection(): Promise<Connection | null> {
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  return (data as Connection) ?? null;
+  return (data as WaConnection) ?? null;
 }
 
 export async function ingestWhatsApp(events: WaEvent[]): Promise<WaReport> {
@@ -73,11 +73,19 @@ export async function ingestWhatsApp(events: WaEvent[]): Promise<WaReport> {
   return report;
 }
 
-async function saveMessages(conn: Connection, guest: string, list: WaMessage[]): Promise<number> {
+/**
+ * The WhatsApp chat with this number, created (with its guest) if there is none.
+ * Used for every incoming message, and by "New chat" when staff write first.
+ */
+export async function ensureWhatsAppConversation(
+  conn: WaConnection,
+  guest: string,
+  name: string,
+): Promise<{ id: string; status: string; created: boolean }> {
   const db = supabaseAdmin();
   const orgId = conn.organization_id;
   const threadKey = `whatsapp:${guest}`;
-  const name = list.find((m) => m.guestName)?.guestName ?? "";
+  let created = false;
 
   let { data: conversation } = await db
     .from("conversations")
@@ -88,6 +96,7 @@ async function saveMessages(conn: Connection, guest: string, list: WaMessage[]):
     .maybeSingle();
 
   if (!conversation) {
+    created = true;
     const guestId = await ensureGuest(orgId, guest, name);
     const { data: reservation } = await db
       .from("reservations")
@@ -117,6 +126,14 @@ async function saveMessages(conn: Connection, guest: string, list: WaMessage[]):
     if (error || !data) throw new Error(`conversation: ${error?.message}`);
     conversation = data;
   }
+  return { ...conversation, created };
+}
+
+async function saveMessages(conn: WaConnection, guest: string, list: WaMessage[]): Promise<number> {
+  const db = supabaseAdmin();
+  const orgId = conn.organization_id;
+  const name = list.find((m) => m.guestName)?.guestName ?? "";
+  const conversation = await ensureWhatsAppConversation(conn, guest, name);
 
   const rows = list.map((m) => {
     const ours = m.kind === "echo";

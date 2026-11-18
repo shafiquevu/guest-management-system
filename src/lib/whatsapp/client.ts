@@ -113,6 +113,101 @@ export async function sendWhatsAppReaction(to: string, messageId: string, emoji:
   });
 }
 
+/**
+ * Message templates, for starting a chat. WhatsApp only lets a business write
+ * first (or after 24 hours of silence) with a template Meta has approved.
+ * Templates are created in WhatsApp Manager / the 360dialog hub; this lists
+ * the approved ones that need nothing but text: a template whose header is a
+ * photo, video or document, or whose button carries a variable, is left out.
+ */
+export type WaTemplate = {
+  name: string;
+  language: string;
+  category: string;
+  /** The body as Meta stores it, with {{1}} or {{name}} placeholders. */
+  body: string;
+  /** Placeholders in order of appearance, without the braces: ["1", "2"] or ["guest_name"]. */
+  params: string[];
+  /** A text header, if any (no variables). */
+  header: string | null;
+  footer: string | null;
+};
+
+type RawTemplate = {
+  name?: string;
+  language?: string;
+  status?: string;
+  category?: string;
+  components?: { type?: string; format?: string; text?: string; buttons?: { url?: string; text?: string }[] }[];
+};
+
+const PLACEHOLDER = /\{\{\s*([\w.]+)\s*\}\}/g;
+
+export function templateParams(text: string): string[] {
+  return [...new Set([...text.matchAll(PLACEHOLDER)].map((m) => m[1]))];
+}
+
+/** The template's body with the placeholders filled in: what the guest will read. */
+export function renderTemplate(t: Pick<WaTemplate, "body" | "header" | "footer">, values: Record<string, string>): string {
+  const body = t.body.replace(PLACEHOLDER, (_, k: string) => values[k] ?? `{{${k}}}`);
+  return [t.header, body, t.footer].filter(Boolean).join("\n\n");
+}
+
+export async function listTemplates(): Promise<WaTemplate[]> {
+  const data = await d360<{ waba_templates?: RawTemplate[] }>("GET", "/v1/configs/templates?limit=200");
+  const out: WaTemplate[] = [];
+  for (const t of data.waba_templates ?? []) {
+    if (String(t.status ?? "").toLowerCase() !== "approved" || !t.name || !t.language) continue;
+    const parts = t.components ?? [];
+    const header = parts.find((c) => String(c.type).toUpperCase() === "HEADER");
+    const body = parts.find((c) => String(c.type).toUpperCase() === "BODY");
+    const footer = parts.find((c) => String(c.type).toUpperCase() === "FOOTER");
+    const buttons = parts.find((c) => String(c.type).toUpperCase() === "BUTTONS");
+    if (!body?.text) continue;
+    if (header && (String(header.format ?? "TEXT").toUpperCase() !== "TEXT" || templateParams(header.text ?? "").length)) continue;
+    if ((buttons?.buttons ?? []).some((b) => templateParams(b.url ?? "").length)) continue;
+    out.push({
+      name: t.name,
+      language: t.language,
+      category: String(t.category ?? "").toLowerCase(),
+      body: body.text,
+      params: templateParams(body.text),
+      header: header?.text ?? null,
+      footer: footer?.text ?? null,
+    });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Send an approved template. `values` fills its body placeholders. Returns WhatsApp's message id. */
+export async function sendWhatsAppTemplate(
+  to: string,
+  t: Pick<WaTemplate, "name" | "language" | "params">,
+  values: Record<string, string>,
+): Promise<{ id: string; raw: unknown }> {
+  // Numbered placeholders ({{1}}) are filled by position; named ones ({{guest_name}}) by name.
+  const named = t.params.some((p) => !/^\d+$/.test(p));
+  const parameters = t.params.map((p) => ({
+    type: "text",
+    text: values[p] ?? "",
+    ...(named ? { parameter_name: p } : {}),
+  }));
+  const data = await d360<{ messages?: { id: string }[] }>("POST", "/messages", {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to,
+    type: "template",
+    template: {
+      name: t.name,
+      language: { code: t.language },
+      ...(parameters.length ? { components: [{ type: "body", parameters }] } : {}),
+    },
+  });
+  const id = data.messages?.[0]?.id;
+  if (!id) throw new WhatsAppError("WhatsApp accepted the template but returned no message id.");
+  return { id, raw: data };
+}
+
 export function webhookUrl(origin: string): string {
   const base = (process.env.APP_URL || origin).replace(/\/$/, "");
   return `${base}/api/webhooks/whatsapp?key=${encodeURIComponent(process.env.WHATSAPP_WEBHOOK_KEY ?? "")}`;

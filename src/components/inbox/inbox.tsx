@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Inbox as InboxIcon, MessageSquareText, RefreshCw, Search, Timer } from "lucide-react";
+import { Inbox as InboxIcon, MessageSquareText, Plus, RefreshCw, Search, Timer } from "lucide-react";
 import { useApp } from "@/components/app-shell";
 import { brandOf } from "@/components/channel-logo";
 import { Avatar, Chip, cx, EmptyState, field, GuestAvatar, Tabs } from "@/components/ui";
 import { awaitingReply, CATEGORY_LABEL, CHANNEL_LABEL, messagePreview, PRIORITY_CHIP, STAY_STYLE, stayStatus, timeAgo } from "@/lib/format";
 import { useLoader } from "@/lib/use-loader";
 import { DetailsPanel } from "./details-panel";
+import { NewChat } from "./new-chat";
 import { Thread } from "./thread";
 
 export type ConversationRow = {
@@ -64,6 +65,7 @@ export function Inbox() {
   const [repliedBy, setRepliedBy] = useState("");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<"newest" | "urgent">("newest");
+  const [composing, setComposing] = useState(false);
 
   const load = useCallback(async () => {
     let query = supabase
@@ -217,15 +219,17 @@ export function Inbox() {
   useEffect(() => {
     if (!linked || loading || opened.current === linked) return;
     opened.current = linked;
-    setSelectedId(linked);
     const here = conversations.find((c) => c.id === linked);
-    if (here) {
-      // Resolved threads are not on the Active tab: show the tab it is on.
-      if (!inTab(here, tab)) setTab("all");
-      return;
-    }
-    // Not in the loaded list (or hidden by a filter): fetch that one thread.
-    void supabase.from("conversations").select(SELECT).eq("id", linked).maybeSingle().then(({ data }) => {
+    // State is set after the effect (same pattern as useLoader), not inside it.
+    void Promise.resolve().then(async () => {
+      setSelectedId(linked);
+      if (here) {
+        // Resolved threads are not on the Active tab: show the tab it is on.
+        if (!inTab(here, tab)) setTab("all");
+        return;
+      }
+      // Not in the loaded list (or hidden by a filter): fetch that one thread.
+      const { data } = await supabase.from("conversations").select(SELECT).eq("id", linked).maybeSingle();
       if (!data) return;
       setConversations((cs) => (cs.some((c) => c.id === linked) ? cs : [data as unknown as ConversationRow, ...cs]));
       setTab("all");
@@ -265,8 +269,29 @@ export function Inbox() {
                   {syncing ? "Syncing…" : "Sync now"}
                 </button>
               )}
+              {profile.role !== "read_only" && (
+                <button
+                  type="button"
+                  onClick={() => setComposing(true)}
+                  title="Write to a guest first (WhatsApp or email)"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-500"
+                >
+                  <Plus className="h-3.5 w-3.5" /> New chat
+                </button>
+              )}
             </div>
           </div>
+          {composing && (
+            <NewChat
+              onClose={() => setComposing(false)}
+              onOpened={(id) => {
+                setComposing(false);
+                setTab("all");
+                setSelectedId(id);
+                void load();
+              }}
+            />
+          )}
           {syncNote && (
             <p className={cx("rounded-lg px-3 py-1.5 text-xs", syncNote.ok ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700")}>
               {syncNote.text}

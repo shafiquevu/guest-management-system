@@ -116,7 +116,7 @@ async function syncThread(conn: GmailConnection, thread: Thread, report: SyncRep
 
   let conversation = existing;
   if (!conversation) {
-    const guestId = await ensureGuest(orgId, guest.email, guest.name);
+    const guestId = await ensureEmailGuest(orgId, guest.email, guest.name);
     const { data: reservation } = await db
       .from("reservations")
       .select("id, property_id")
@@ -211,7 +211,7 @@ async function syncThread(conn: GmailConnection, thread: Thread, report: SyncRep
 }
 
 /** The guest behind an email address: an existing one (from a booking) if we know the address. */
-async function ensureGuest(orgId: string, email: string, name: string): Promise<string> {
+export async function ensureEmailGuest(orgId: string, email: string, name: string): Promise<string> {
   const db = supabaseAdmin();
   const { data: known } = await db
     .from("guest_identities")
