@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Inbox as InboxIcon, MessageSquareText, Plus, RefreshCw, Search, Timer } from "lucide-react";
+import { Inbox as InboxIcon, MessageSquareText, Plus, RefreshCw, Search, SlidersHorizontal, Timer, X } from "lucide-react";
 import { useApp } from "@/components/app-shell";
 import { brandOf } from "@/components/channel-logo";
 import { Avatar, Chip, cx, EmptyState, field, GuestAvatar, Tabs } from "@/components/ui";
@@ -65,6 +65,8 @@ export function Inbox() {
   const [repliedBy, setRepliedBy] = useState("");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<"newest" | "urgent">("newest");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filtersRef = useRef<HTMLDivElement>(null);
   const [composing, setComposing] = useState(false);
 
   const load = useCallback(async () => {
@@ -162,6 +164,63 @@ export function Inbox() {
 
   // "Sync now": email + Beds24 straight away, instead of waiting for the schedule.
   // WhatsApp needs no sync -- it arrives the moment it is sent.
+  // Filters that are switched on, shown as removable chips under the search box.
+  const activeFilters = useMemo(() => {
+    const name = (id: string) => (id === profile.id ? "me" : (staff.find((s) => s.id === id)?.full_name ?? "someone"));
+    const list: { key: string; label: string; clear: () => void }[] = [];
+    if (channel) list.push({ key: "channel", label: CHANNEL_LABEL[channel] ?? channel, clear: () => setChannel("") });
+    if (assignee !== "all") {
+      list.push({
+        key: "assignee",
+        label: assignee === "unassigned" ? "Unassigned" : `Assigned to ${name(assignee === "me" ? profile.id : assignee)}`,
+        clear: () => setAssignee("all"),
+      });
+    }
+    if (repliedBy) list.push({ key: "replied", label: `Replied by ${name(repliedBy)}`, clear: () => setRepliedBy("") });
+    if (propertyId) {
+      list.push({ key: "property", label: properties.find((p) => p.id === propertyId)?.name ?? "Property", clear: () => setPropertyId("") });
+    }
+    if (sort !== "newest") list.push({ key: "sort", label: "Urgent first", clear: () => setSort("newest") });
+    return list;
+  }, [channel, assignee, repliedBy, propertyId, sort, staff, properties, profile.id]);
+  const clearFilters = () => {
+    setChannel("");
+    setAssignee("all");
+    setRepliedBy("");
+    setPropertyId("");
+    setSort("newest");
+  };
+  // The rows of the filter panel: label, value, setter, options.
+  const filterRows: [string, string, (v: string) => void, string[][]][] = [
+    ["Channel", channel, setChannel, [["", "All channels"], ...Object.entries(CHANNEL_LABEL)]],
+    [
+      "Assigned to",
+      assignee,
+      setAssignee,
+      [["all", "Anyone"], ["me", "Me"], ["unassigned", "Nobody (unassigned)"], ...staff.filter((s) => s.id !== profile.id).map((s) => [s.id, s.full_name])],
+    ],
+    ["Replied by", repliedBy, setRepliedBy, [["", "Anyone"], ...staff.map((s) => [s.id, s.id === profile.id ? "Me" : s.full_name])]],
+    ["Property", propertyId, setPropertyId, [["", "All properties"], ...properties.map((p) => [p.id, p.name])]],
+    ["Sort", sort, (v) => setSort(v as "newest" | "urgent"), [["newest", "Newest message first"], ["urgent", "Escalated & urgent first"]]],
+  ];
+
+  // The filter panel closes on a click outside it or on Esc.
+  useEffect(() => {
+    if (!filtersOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!filtersRef.current?.contains(e.target as Node)) setFiltersOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFiltersOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [filtersOpen]);
+
   const [syncing, setSyncing] = useState(false);
   const [syncNote, setSyncNote] = useState<{ ok: boolean; text: string } | null>(null);
   async function syncNow() {
@@ -297,16 +356,92 @@ export function Inbox() {
               {syncNote.text}
             </p>
           )}
-          <div className="relative">
-            <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search guest, property or booking code"
-              className={cx(field, "pl-9")}
-              aria-label="Search conversations"
-            />
+          <div ref={filtersRef} className="relative flex gap-2">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search guest, property, booking"
+                className={cx(field, "pl-9")}
+                aria-label="Search conversations"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setFiltersOpen((o) => !o)}
+              aria-expanded={filtersOpen}
+              title="Filter and sort"
+              className={cx(
+                "relative inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 text-sm font-medium ring-1 transition",
+                filtersOpen || activeFilters.length
+                  ? "bg-indigo-50 text-indigo-700 ring-indigo-200"
+                  : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50",
+              )}
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              <span className="sr-only sm:not-sr-only">Filters</span>
+              {activeFilters.length > 0 && (
+                <span className="rounded-full bg-indigo-600 px-1.5 text-[10px] leading-4 font-semibold text-white">{activeFilters.length}</span>
+              )}
+            </button>
+
+            {filtersOpen && (
+              <div className="absolute top-full right-0 left-0 z-30 mt-2 rounded-xl bg-white p-3 shadow-lg ring-1 ring-slate-200">
+                <div className="space-y-2">
+                  {filterRows.map(([label, value, set, options]) => (
+                    <label key={label} className="flex items-center gap-3">
+                      <span className="w-20 shrink-0 text-xs font-medium text-slate-500">{label}</span>
+                      <select value={value} onChange={(e) => set(e.target.value)} className={cx(field, "py-1.5 text-xs")}>
+                        {options.map(([k, v]) => (
+                          <option key={k} value={k}>{v}</option>
+                        ))}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+                <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    disabled={!activeFilters.length}
+                    className="text-xs font-medium text-slate-500 hover:text-slate-800 disabled:opacity-40"
+                  >
+                    Clear all
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFiltersOpen(false)}
+                    className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
+
+          {activeFilters.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {activeFilters.map((f) => (
+                <span
+                  key={f.key}
+                  className="inline-flex max-w-full items-center gap-1 rounded-full bg-indigo-50 py-0.5 pr-1 pl-2.5 text-xs font-medium text-indigo-700 ring-1 ring-indigo-100"
+                >
+                  <span className="truncate">{f.label}</span>
+                  <button type="button" onClick={f.clear} className="rounded-full p-0.5 hover:bg-indigo-100" aria-label={`Remove filter: ${f.label}`}>
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
+              {activeFilters.length > 1 && (
+                <button type="button" onClick={clearFilters} className="px-1 text-xs font-medium text-slate-500 hover:text-slate-800">
+                  Clear all
+                </button>
+              )}
+            </div>
+          )}
+
           <Tabs
             value={tab}
             onChange={setTab}
@@ -317,38 +452,6 @@ export function Inbox() {
               { key: "all", label: "All" },
             ]}
           />
-          <div className="grid grid-cols-2 gap-2">
-            <select value={channel} onChange={(e) => setChannel(e.target.value)} className={cx(field, "py-1.5 text-xs")} aria-label="Channel">
-              <option value="">All channels</option>
-              {Object.entries(CHANNEL_LABEL).map(([k, v]) => (
-                <option key={k} value={k}>{v}</option>
-              ))}
-            </select>
-            <select value={assignee} onChange={(e) => setAssignee(e.target.value)} className={cx(field, "py-1.5 text-xs")} aria-label="Assigned to">
-              <option value="all">Assigned: anyone</option>
-              <option value="me">Assigned to me</option>
-              <option value="unassigned">Unassigned</option>
-              {staff.filter((s) => s.id !== profile.id).map((s) => (
-                <option key={s.id} value={s.id}>Assigned to {s.full_name}</option>
-              ))}
-            </select>
-            <select value={repliedBy} onChange={(e) => setRepliedBy(e.target.value)} className={cx(field, "py-1.5 text-xs")} aria-label="Replied by">
-              <option value="">Replied by: anyone</option>
-              {staff.map((s) => (
-                <option key={s.id} value={s.id}>Replied by {s.id === profile.id ? "me" : s.full_name}</option>
-              ))}
-            </select>
-            <select value={propertyId} onChange={(e) => setPropertyId(e.target.value)} className={cx(field, "py-1.5 text-xs")} aria-label="Property">
-              <option value="">All properties</option>
-              {properties.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-            <select value={sort} onChange={(e) => setSort(e.target.value as "newest" | "urgent")} className={cx(field, "col-span-2 py-1.5 text-xs")} aria-label="Sort">
-              <option value="newest">Sort: newest message first</option>
-              <option value="urgent">Sort: escalated &amp; urgent first</option>
-            </select>
-          </div>
         </div>
 
         <ul className="scroll-thin relative min-h-0 flex-1 overflow-y-auto">
