@@ -35,6 +35,7 @@ type Message = {
     from?: string;
     to?: string;
     cc?: string;
+    bcc?: string;
   } | null;
 };
 
@@ -68,6 +69,10 @@ export function Thread({
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   // Email: reply to everyone on the email (To + Cc), not just the sender.
   const [replyAll, setReplyAll] = useState(false);
+  // Email: extra people to copy in (comma-separated), shown on demand.
+  const [ccOpen, setCcOpen] = useState(false);
+  const [cc, setCc] = useState("");
+  const [bcc, setBcc] = useState("");
   // Email: which emails are unfolded (the newest one is, by default).
   const [unfolded, setUnfolded] = useState<Record<string, boolean>>({});
   const isEmail = conversation.channel === "gmail";
@@ -211,6 +216,8 @@ export function Thread({
         ...(attachment ? { attachment } : {}),
         ...(replyTo ? { replyToMessageId: replyTo.id } : {}),
         ...(isEmail && replyAll ? { replyAll: true } : {}),
+        ...(isEmail && cc.trim() ? { cc } : {}),
+        ...(isEmail && bcc.trim() ? { bcc } : {}),
       },
     });
     setSending(false);
@@ -219,6 +226,9 @@ export function Thread({
       setFile(null);
       setReplyTo(null);
       setReplyAll(false);
+      setCc("");
+      setBcc("");
+      setCcOpen(false);
       setAiNote(null);
     } else setSendError(res.data?.error ?? "The reply could not be sent.");
     load();
@@ -618,15 +628,46 @@ export function Thread({
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-slate-100 px-3.5 py-2 text-xs text-slate-500">
                 <span><span className="text-slate-400">To:</span> {replyTarget}</span>
                 {replyAll && replyCc.length > 0 && <span><span className="text-slate-400">Cc:</span> {replyCc.join(", ")}</span>}
-                {replyCc.length > 0 && (
+                <span className="ml-auto flex items-center gap-1.5">
+                  {replyCc.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setReplyAll((a) => !a)}
+                      className={cx("rounded-md px-2 py-0.5 font-medium ring-1", replyAll ? "bg-indigo-50 text-indigo-700 ring-indigo-200" : "text-slate-600 ring-slate-200 hover:bg-slate-50")}
+                    >
+                      {replyAll ? "Replying to all" : "Reply all"}
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={() => setReplyAll((a) => !a)}
-                    className={cx("ml-auto rounded-md px-2 py-0.5 font-medium ring-1", replyAll ? "bg-indigo-50 text-indigo-700 ring-indigo-200" : "text-slate-600 ring-slate-200 hover:bg-slate-50")}
+                    onClick={() => setCcOpen((o) => !o)}
+                    className={cx("rounded-md px-2 py-0.5 font-medium ring-1", ccOpen ? "bg-indigo-50 text-indigo-700 ring-indigo-200" : "text-slate-600 ring-slate-200 hover:bg-slate-50")}
                   >
-                    {replyAll ? "Replying to all" : "Reply all"}
+                    Cc / Bcc
                   </button>
-                )}
+                </span>
+              </div>
+            )}
+            {isEmail && ccOpen && (
+              <div className="space-y-1 border-b border-slate-100 px-3.5 py-2 text-xs">
+                <label className="flex items-center gap-2">
+                  <span className="w-8 text-slate-400">Cc</span>
+                  <input
+                    value={cc}
+                    onChange={(e) => setCc(e.target.value)}
+                    placeholder="name@example.com, another@example.com"
+                    className="min-w-0 flex-1 rounded-md border-0 bg-slate-50 px-2 py-1 text-xs text-slate-900 ring-1 ring-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  />
+                </label>
+                <label className="flex items-center gap-2">
+                  <span className="w-8 text-slate-400">Bcc</span>
+                  <input
+                    value={bcc}
+                    onChange={(e) => setBcc(e.target.value)}
+                    placeholder="Hidden copy: others will not see these addresses"
+                    className="min-w-0 flex-1 rounded-md border-0 bg-slate-50 px-2 py-1 text-xs text-slate-900 ring-1 ring-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  />
+                </label>
               </div>
             )}
             {replyTo && (

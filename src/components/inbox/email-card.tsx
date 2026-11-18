@@ -14,7 +14,7 @@ export type EmailMessage = {
   sender_address: string | null;
   recipient_address: string | null;
   provider_error: string | null;
-  raw_payload: { subject?: string; from?: string; to?: string; cc?: string } | null;
+  raw_payload: { subject?: string; from?: string; to?: string; cc?: string; bcc?: string } | null;
 };
 
 /** Every address in a header like `"Ann" <a@x.com>, b@y.com`. */
@@ -89,6 +89,7 @@ export function EmailCard({
             <div className="mt-0.5 space-y-0.5 text-xs text-slate-500">
               {to && <p className="truncate"><span className="text-slate-400">To:</span> {to}</p>}
               {cc && <p className="truncate"><span className="text-slate-400">Cc:</span> {cc}</p>}
+              {outbound && raw.bcc && <p className="truncate"><span className="text-slate-400">Bcc:</span> {raw.bcc}</p>}
               {label && <p className="text-slate-400">{label}</p>}
             </div>
           ) : (

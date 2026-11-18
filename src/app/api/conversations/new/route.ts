@@ -1,5 +1,5 @@
 import { canSeeConversation, errorResponse, requireStaff } from "@/lib/auth/staff";
-import { sendGmailNew } from "@/lib/gmail/send";
+import { emailList, sendGmailNew } from "@/lib/gmail/send";
 import { gmailConnection } from "@/lib/gmail/client";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { refreshConversation } from "@/lib/sync/beds24";
@@ -121,14 +121,19 @@ export async function POST(request: Request) {
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return Response.json({ error: "Enter a valid email address." }, { status: 400 });
       if (!subject) return Response.json({ error: "Add a subject." }, { status: 400 });
       if (!body || body.length > 5000) return Response.json({ error: "Write a message between 1 and 5000 characters." }, { status: 400 });
+      const cc = emailList(input?.cc);
+      const bcc = emailList(input?.bcc);
+      if (cc === null || bcc === null) {
+        return Response.json({ error: "Check the Cc / Bcc addresses: one of them is not a valid email." }, { status: 400 });
+      }
       const conn = await gmailConnection();
       if (!conn || conn.organizationId !== staff.organizationId) {
         return Response.json({ error: "Gmail is not connected. An admin can connect it in Settings." }, { status: 503 });
       }
 
-      let sent: { id: string; threadId: string; from: string };
+      let sent: { id: string; threadId: string; from: string; cc: string[]; bcc: string[] };
       try {
-        sent = await sendGmailNew(email, subject, body);
+        sent = await sendGmailNew(email, subject, body, { cc, bcc });
       } catch (e) {
         return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 502 });
       }
@@ -165,7 +170,11 @@ export async function POST(request: Request) {
           recipient_address: email,
           body,
           content_type: "text",
-          raw_payload: { id: sent.id, threadId: sent.threadId, subject, to: email, from: sent.from },
+          raw_payload: {
+            id: sent.id, threadId: sent.threadId, subject, to: email, from: sent.from,
+            ...(sent.cc.length ? { cc: sent.cc.join(", ") } : {}),
+            ...(sent.bcc.length ? { bcc: sent.bcc.join(", ") } : {}),
+          },
           sent_at: now,
         },
         { onConflict: "organization_id,channel,external_message_id", ignoreDuplicates: true },

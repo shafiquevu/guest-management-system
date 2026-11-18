@@ -32,6 +32,8 @@ export function NewChat({ onClose, onOpened }: { onClose: () => void; onOpened: 
   const [email, setEmail] = useState("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
+  const [cc, setCc] = useState("");
+  const [bcc, setBcc] = useState("");
   const [templates, setTemplates] = useState<Template[] | null>(null);
   const [templateError, setTemplateError] = useState<string | null>(null);
   const [picked, setPicked] = useState("");
@@ -60,7 +62,7 @@ export function NewChat({ onClose, onOpened }: { onClose: () => void; onOpened: 
       json:
         channel === "whatsapp"
           ? { channel, phone, name, template: template && { name: template.name, language: template.language }, values }
-          : { channel, email, name, subject, body },
+          : { channel, email, name, subject, body, cc, bcc },
     });
     setSending(false);
     if (!res.ok || !res.data?.conversationId) {
@@ -168,6 +170,16 @@ export function NewChat({ onClose, onOpened }: { onClose: () => void; onOpened: 
                 <span className="mb-1 block text-xs font-medium text-slate-500">Email</span>
                 <input value={email} onChange={(e) => setEmail(e.target.value)} className={field} placeholder="guest@example.com" inputMode="email" />
               </label>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-slate-500">Cc (optional)</span>
+                  <input value={cc} onChange={(e) => setCc(e.target.value)} className={field} placeholder="a@x.com, b@y.com" />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-slate-500">Bcc (optional)</span>
+                  <input value={bcc} onChange={(e) => setBcc(e.target.value)} className={field} placeholder="hidden copy" />
+                </label>
+              </div>
               <label className="block">
                 <span className="mb-1 block text-xs font-medium text-slate-500">Subject</span>
                 <input value={subject} onChange={(e) => setSubject(e.target.value)} className={field} placeholder="Your stay at…" />

@@ -1,6 +1,6 @@
 import { canSeeConversation, errorResponse, requireStaff } from "@/lib/auth/staff";
 import { beds24, isConfigured } from "@/lib/beds24/client";
-import { sendGmailReply } from "@/lib/gmail/send";
+import { emailList, sendGmailReply } from "@/lib/gmail/send";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { refreshConversation } from "@/lib/sync/beds24";
 import { BUCKET } from "@/lib/attachments";
@@ -52,9 +52,16 @@ export async function POST(request: Request) {
     }
 
     // A retried attachment keeps its file and caption in raw_payload.
-    const stored = (row?.raw_payload ?? null) as { attachment?: Attachment; caption?: string; reply_to?: string; reply_all?: boolean } | null;
-    // Email only: reply to everyone on the guest's email (To + Cc).
+    const stored = (row?.raw_payload ?? null) as {
+      attachment?: Attachment; caption?: string; reply_to?: string; reply_all?: boolean; add_cc?: string[]; add_bcc?: string[];
+    } | null;
+    // Email only: reply to everyone on the guest's email (To + Cc), and/or add Cc / Bcc.
     const replyAll = Boolean(stored?.reply_all ?? input?.replyAll);
+    const addCc = stored?.add_cc ?? emailList(input?.cc);
+    const addBcc = stored?.add_bcc ?? emailList(input?.bcc);
+    if (addCc === null || addBcc === null) {
+      return Response.json({ error: "Check the Cc / Bcc addresses: one of them isn't a valid email." }, { status: 400 });
+    }
     const attachment: Attachment | null = stored?.attachment
       ?? (input?.attachment?.path
         ? { path: String(input.attachment.path), name: String(input.attachment.name ?? "file"), type: String(input.attachment.type ?? ""), size: Number(input.attachment.size) || 0 }
@@ -145,12 +152,14 @@ export async function POST(request: Request) {
             sender_name: staff.fullName,
             sent_by: staff.id,
             body: attachment && kind ? attachmentBody(kind, fileName, text) : text,
-            ...(attachment || replyTo || (viaGmail && replyAll)
+            ...(attachment || replyTo || (viaGmail && (replyAll || addCc.length || addBcc.length))
               ? {
                   raw_payload: {
                     ...(attachment ? { attachment, caption: text } : {}),
                     ...(replyTo ? { reply_to: replyTo } : {}),
                     ...(viaGmail && replyAll ? { reply_all: true } : {}),
+                    ...(viaGmail && addCc.length ? { add_cc: addCc } : {}),
+                    ...(viaGmail && addBcc.length ? { add_bcc: addBcc } : {}),
                   },
                 }
               : {}),
@@ -206,10 +215,12 @@ export async function POST(request: Request) {
     let providerError: string | null = null;
     let providerResponse: unknown = null;
     let externalId: string | null = null;
+    let emailSent: { to: string; cc: string[]; bcc: string[] } | null = null;
     if (viaGmail) {
       try {
-        const sent = await sendGmailReply(conversation.id, text, { replyAll });
+        const sent = await sendGmailReply(conversation.id, text, { replyAll, cc: addCc, bcc: addBcc });
         providerResponse = sent;
+        emailSent = sent;
         externalId = `gmail:${sent.id}`; // the next sync recognises it and doesn't import it twice
         status = "sent";
       } catch (e) {
@@ -256,6 +267,18 @@ export async function POST(request: Request) {
         provider_response: providerResponse,
         sent_at: status === "sent" ? now : null,
         ...(externalId ? { external_message_id: externalId } : {}),
+        // The email card shows who it went to.
+        ...(emailSent
+          ? {
+              recipient_address: emailSent.to,
+              raw_payload: {
+                ...((row.raw_payload as Record<string, unknown> | undefined) ?? stored ?? {}),
+                to: emailSent.to,
+                ...(emailSent.cc.length ? { cc: emailSent.cc.join(", ") } : {}),
+                ...(emailSent.bcc.length ? { bcc: emailSent.bcc.join(", ") } : {}),
+              },
+            }
+          : {}),
       })
       .eq("id", row.id);
 
