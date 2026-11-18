@@ -52,7 +52,9 @@ export async function POST(request: Request) {
     }
 
     // A retried attachment keeps its file and caption in raw_payload.
-    const stored = (row?.raw_payload ?? null) as { attachment?: Attachment; caption?: string; reply_to?: string } | null;
+    const stored = (row?.raw_payload ?? null) as { attachment?: Attachment; caption?: string; reply_to?: string; reply_all?: boolean } | null;
+    // Email only: reply to everyone on the guest's email (To + Cc).
+    const replyAll = Boolean(stored?.reply_all ?? input?.replyAll);
     const attachment: Attachment | null = stored?.attachment
       ?? (input?.attachment?.path
         ? { path: String(input.attachment.path), name: String(input.attachment.name ?? "file"), type: String(input.attachment.type ?? ""), size: Number(input.attachment.size) || 0 }
@@ -143,8 +145,14 @@ export async function POST(request: Request) {
             sender_name: staff.fullName,
             sent_by: staff.id,
             body: attachment && kind ? attachmentBody(kind, fileName, text) : text,
-            ...(attachment || replyTo
-              ? { raw_payload: { ...(attachment ? { attachment, caption: text } : {}), ...(replyTo ? { reply_to: replyTo } : {}) } }
+            ...(attachment || replyTo || (viaGmail && replyAll)
+              ? {
+                  raw_payload: {
+                    ...(attachment ? { attachment, caption: text } : {}),
+                    ...(replyTo ? { reply_to: replyTo } : {}),
+                    ...(viaGmail && replyAll ? { reply_all: true } : {}),
+                  },
+                }
               : {}),
           },
           { onConflict: "organization_id,channel,external_message_id", ignoreDuplicates: true },
@@ -200,7 +208,7 @@ export async function POST(request: Request) {
     let externalId: string | null = null;
     if (viaGmail) {
       try {
-        const sent = await sendGmailReply(conversation.id, text);
+        const sent = await sendGmailReply(conversation.id, text, { replyAll });
         providerResponse = sent;
         externalId = `gmail:${sent.id}`; // the next sync recognises it and doesn't import it twice
         status = "sent";

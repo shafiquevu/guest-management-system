@@ -3,7 +3,7 @@ import { gmail, gmailConnection } from "@/lib/gmail/client";
 import { address } from "@/lib/gmail/parse";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
-type Raw = { threadId?: string; messageId?: string; references?: string; subject?: string; from?: string; cc?: string };
+type Raw = { threadId?: string; messageId?: string; references?: string; subject?: string; from?: string; to?: string; cc?: string };
 
 const b64 = (s: string) => Buffer.from(s, "utf8").toString("base64");
 /** RFC 2047 encoding, so names and subjects in any language arrive intact. */
@@ -13,7 +13,7 @@ const word = (s: string) => (/^[\x20-\x7e]*$/.test(s) ? s : `=?UTF-8?B?${b64(s)}
  * Reply in the guest's Gmail thread, from the connected mailbox, to the last
  * person who wrote in. Returns Gmail's id for the sent email.
  */
-export async function sendGmailReply(conversationId: string, text: string): Promise<{ id: string }> {
+export async function sendGmailReply(conversationId: string, text: string, opts: { replyAll?: boolean } = {}): Promise<{ id: string }> {
   const conn = await gmailConnection();
   if (!conn) throw new Error("Gmail is not connected. An admin can connect it in Settings.");
 
@@ -46,9 +46,15 @@ export async function sendGmailReply(conversationId: string, text: string): Prom
 
   const subject = raw.subject ? (/^re:/i.test(raw.subject) ? raw.subject : `Re: ${raw.subject}`) : "Re: your message";
   const references = [raw.references, raw.messageId].filter(Boolean).join(" ").trim();
+  // Reply all: everyone else on the guest's email (its To and Cc), never our own mailbox.
+  const cc = opts.replyAll
+    ? [...new Set(`${raw.to ?? ""},${raw.cc ?? ""}`.match(/[^\s<>,;"']+@[^\s<>,;"']+/g)?.map((a) => a.toLowerCase()) ?? [])]
+        .filter((a) => a !== to.toLowerCase() && a !== conn.email.toLowerCase())
+    : [];
   const mime = [
     `From: ${conn.email}`,
     `To: ${to}`,
+    ...(cc.length ? [`Cc: ${cc.join(", ")}`] : []),
     `Subject: ${word(subject)}`,
     ...(raw.messageId ? [`In-Reply-To: ${raw.messageId}`] : []),
     ...(references ? [`References: ${references}`] : []),

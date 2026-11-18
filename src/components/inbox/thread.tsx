@@ -7,6 +7,7 @@ import { Avatar, btn, ChannelBadge, cx } from "@/components/ui";
 import { CATEGORY_LABEL, CHANNEL_LABEL, clock, dayLabel, messagePreview, parseMessage, type MessageImage } from "@/lib/format";
 import { useLoader } from "@/lib/use-loader";
 import { ACCEPT, checkAttachment } from "@/lib/whatsapp/media";
+import { EmailCard } from "./email-card";
 import type { ConversationRow, StaffOption } from "./inbox";
 
 type Message = {
@@ -16,6 +17,8 @@ type Message = {
   body: string | null;
   content_type: string;
   sender_name: string | null;
+  sender_address: string | null;
+  recipient_address: string | null;
   sent_by: string | null;
   provider_error: string | null;
   received_at: string | null;
@@ -28,6 +31,10 @@ type Message = {
     edited?: boolean;
     deleted?: boolean;
     original_body?: string;
+    subject?: string;
+    from?: string;
+    to?: string;
+    cc?: string;
   } | null;
 };
 
@@ -59,6 +66,11 @@ export function Thread({
   const picker = useRef<HTMLInputElement>(null);
   const canAttach = conversation.channel === "whatsapp";
   const [replyTo, setReplyTo] = useState<Message | null>(null);
+  // Email: reply to everyone on the email (To + Cc), not just the sender.
+  const [replyAll, setReplyAll] = useState(false);
+  // Email: which emails are unfolded (the newest one is, by default).
+  const [unfolded, setUnfolded] = useState<Record<string, boolean>>({});
+  const isEmail = conversation.channel === "gmail";
   const [reactFor, setReactFor] = useState<string | null>(null);
 
   // A thumbnail for a chosen photo; freed when the file changes.
@@ -89,7 +101,7 @@ export function Thread({
   const load = useCallback(async () => {
     const { data } = await supabase
       .from("messages")
-      .select("id, direction, status, body, content_type, sender_name, sent_by, provider_error, received_at, sent_at, created_at, external_message_id, raw_payload")
+      .select("id, direction, status, body, content_type, sender_name, sender_address, recipient_address, sent_by, provider_error, received_at, sent_at, created_at, external_message_id, raw_payload")
       .eq("conversation_id", conversation.id)
       .order("created_at");
     const rows = ((data ?? []) as Message[]).sort((a, b) => when(a).localeCompare(when(b)));
@@ -198,6 +210,7 @@ export function Thread({
         clientKey: crypto.randomUUID(),
         ...(attachment ? { attachment } : {}),
         ...(replyTo ? { replyToMessageId: replyTo.id } : {}),
+        ...(isEmail && replyAll ? { replyAll: true } : {}),
       },
     });
     setSending(false);
@@ -205,6 +218,7 @@ export function Thread({
       setDraft("");
       setFile(null);
       setReplyTo(null);
+      setReplyAll(false);
       setAiNote(null);
     } else setSendError(res.data?.error ?? "The reply could not be sent.");
     load();
@@ -277,6 +291,16 @@ export function Thread({
     m.sent_by ? `Replied by ${m.sent_by === profile.id ? "you" : (author(m)?.full_name ?? m.sender_name ?? "staff")}` : "Sent outside the inbox";
 
   const canReply = REPLYABLE.includes(conversation.channel);
+  const lastEmailId = isEmail ? [...messages].reverse().find((m) => m.content_type !== "system")?.id : undefined;
+  // Who a reply goes to, shown above the email composer.
+  const lastInbound = isEmail ? [...messages].reverse().find((m) => m.direction === "inbound" && m.content_type !== "system") : undefined;
+  const replyTarget = lastInbound?.sender_address || [...messages].reverse().find((m) => m.direction === "outbound")?.recipient_address || "";
+  const replyCc = useMemo(() => {
+    if (!lastInbound?.raw_payload) return [] as string[];
+    const ours = new Set(messages.filter((m) => m.direction === "outbound" && m.sender_address).map((m) => m.sender_address!.toLowerCase()));
+    const list = `${lastInbound.raw_payload.to ?? ""},${lastInbound.raw_payload.cc ?? ""}`.match(/[^\s<>,;"']+@[^\s<>,;"']+/g) ?? [];
+    return [...new Set(list.map((a) => a.toLowerCase()))].filter((a) => a !== replyTarget.toLowerCase() && !ours.has(a));
+  }, [lastInbound, messages, replyTarget]);
   const resolved = conversation.status === "resolved" || conversation.status === "archived";
   const guestName = conversation.guest?.full_name ?? "Guest";
 
@@ -407,6 +431,9 @@ export function Thread({
       {/* messages */}
       <div className="scroll-thin relative min-h-0 flex-1 overflow-y-auto px-5 py-4">
         {loaded && messages.length === 0 && <p className="text-center text-sm text-slate-500">No messages yet.</p>}
+        {isEmail && conversation.subject && (
+          <h2 className="mb-1 text-lg font-semibold text-slate-900">{conversation.subject.replace(/^(re|fw|fwd):\s*/i, "")}</h2>
+        )}
         {rows.map(({ m, newDay, grouped }) => (
           <Fragment key={m.id}>
             {newDay && (
@@ -419,6 +446,27 @@ export function Thread({
             {m.content_type === "system" ? (
               <div className="mx-auto my-2 max-w-[80%] rounded-lg bg-slate-100 px-3 py-1.5 text-center text-xs text-slate-500">
                 {m.body} · {clock(when(m))}
+              </div>
+            ) : isEmail ? (
+              <div className="mt-3">
+                <EmailCard
+                  m={m}
+                  name={m.direction === "inbound" ? m.sender_name || guestName : author(m)?.full_name ?? m.sender_name ?? "Team"}
+                  avatar={m.direction === "outbound" ? author(m)?.avatar_url : null}
+                  at={when(m)}
+                  label={m.direction === "outbound" ? replyLabel(m) : undefined}
+                  open={unfolded[m.id] ?? (m.id === lastEmailId || m.status === "failed")}
+                  onToggle={() => setUnfolded((u) => ({ ...u, [m.id]: !(u[m.id] ?? (m.id === lastEmailId || m.status === "failed")) }))}
+                  onReply={
+                    canWrite && canReply
+                      ? (all) => {
+                          setReplyAll(all);
+                          box.current?.focus();
+                        }
+                      : undefined
+                  }
+                  onRetry={canWrite ? () => retry(m.id) : undefined}
+                />
               </div>
             ) : (
               <div className={cx("flex items-end gap-2", m.direction === "outbound" ? "justify-end" : "justify-start", grouped ? "mt-1" : "mt-3")}>
@@ -566,6 +614,21 @@ export function Thread({
               choose(e.dataTransfer.files?.[0]);
             }}
           >
+            {isEmail && replyTarget && (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-slate-100 px-3.5 py-2 text-xs text-slate-500">
+                <span><span className="text-slate-400">To:</span> {replyTarget}</span>
+                {replyAll && replyCc.length > 0 && <span><span className="text-slate-400">Cc:</span> {replyCc.join(", ")}</span>}
+                {replyCc.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setReplyAll((a) => !a)}
+                    className={cx("ml-auto rounded-md px-2 py-0.5 font-medium ring-1", replyAll ? "bg-indigo-50 text-indigo-700 ring-indigo-200" : "text-slate-600 ring-slate-200 hover:bg-slate-50")}
+                  >
+                    {replyAll ? "Replying to all" : "Reply all"}
+                  </button>
+                )}
+              </div>
+            )}
             {replyTo && (
               <div className="flex items-start gap-2 border-b border-slate-100 px-3 py-2">
                 <div className="min-w-0 flex-1 border-l-4 border-emerald-500 pl-2">
