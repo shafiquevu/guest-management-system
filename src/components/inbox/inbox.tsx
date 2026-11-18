@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Inbox as InboxIcon, MessageSquareText, RefreshCw, Search, Timer } from "lucide-react";
 import { useApp } from "@/components/app-shell";
 import { brandOf } from "@/components/channel-logo";
@@ -93,8 +94,6 @@ export function Inbox() {
     setLoadError(null);
     const rows = (data ?? []) as unknown as ConversationRow[];
     setConversations(rows);
-    // Alert emails link to /inbox?c=<id>.
-    setSelectedId((current) => current ?? new URLSearchParams(window.location.search).get("c"));
 
     // Last line of each thread, for the preview.
     const ids = rows.map((r) => r.id);
@@ -209,6 +208,34 @@ export function Inbox() {
       })
       .sort((a, b) => rank(a) - rank(b));
   }, [conversations, search, tab, inTab, sort]);
+
+  // A link to one conversation: /inbox?c=<id> (alert emails, Incidents, Reports).
+  // Read through the router so it works on every click, not only on a fresh page
+  // load (Incidents -> "Open the conversation" was landing on an empty inbox).
+  const linked = useSearchParams().get("c");
+  const opened = useRef<string | null>(null);
+  useEffect(() => {
+    if (!linked || loading || opened.current === linked) return;
+    opened.current = linked;
+    setSelectedId(linked);
+    const here = conversations.find((c) => c.id === linked);
+    if (here) {
+      // Resolved threads are not on the Active tab: show the tab it is on.
+      if (!inTab(here, tab)) setTab("all");
+      return;
+    }
+    // Not in the loaded list (or hidden by a filter): fetch that one thread.
+    void supabase.from("conversations").select(SELECT).eq("id", linked).maybeSingle().then(({ data }) => {
+      if (!data) return;
+      setConversations((cs) => (cs.some((c) => c.id === linked) ? cs : [data as unknown as ConversationRow, ...cs]));
+      setTab("all");
+    });
+  }, [linked, loading, conversations, supabase, inTab, tab]);
+  useEffect(() => {
+    if (linked && selectedId === linked) {
+      document.getElementById(`conv-${linked}`)?.scrollIntoView({ block: "center" });
+    }
+  }, [linked, selectedId, tab]);
 
   const selected = conversations.find((c) => c.id === selectedId) ?? null;
   const assignedTo = (id: string | null) => staff.find((s) => s.id === id);
@@ -330,7 +357,7 @@ export function Inbox() {
             const unread = c.unread_count > 0;
             const isSelected = selectedId === c.id;
             return (
-              <li key={c.id}>
+              <li key={c.id} id={`conv-${c.id}`}>
                 <button
                   onClick={() => setSelectedId(c.id)}
                   className={cx(
