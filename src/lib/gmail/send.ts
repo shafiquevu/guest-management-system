@@ -1,5 +1,5 @@
 import "server-only";
-import { gmail, gmailConnection } from "@/lib/gmail/client";
+import { gmail, gmailConnection, gmailSendLarge } from "@/lib/gmail/client";
 import { address } from "@/lib/gmail/parse";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
@@ -8,6 +8,36 @@ type Raw = { threadId?: string; messageId?: string; references?: string; subject
 const b64 = (s: string) => Buffer.from(s, "utf8").toString("base64");
 /** RFC 2047 encoding, so names and subjects in any language arrive intact. */
 const word = (s: string) => (/^[\x20-\x7e]*$/.test(s) ? s : `=?UTF-8?B?${b64(s)}?=`);
+
+/** A file to attach to an email. */
+export type EmailFile = { name: string; type: string; data: Buffer };
+
+/** The content part of an email: plain text, or text plus files (multipart/mixed). */
+function content(text: string, files: EmailFile[] = []): string[] {
+  const textPart = ['Content-Type: text/plain; charset="UTF-8"', "Content-Transfer-Encoding: base64", "", b64(text).replace(/.{76}/g, "$&\r\n")];
+  if (!files.length) return ["MIME-Version: 1.0", ...textPart];
+  const boundary = `mix-${crypto.randomUUID()}`;
+  const parts = files.flatMap((f) => {
+    const name = word(f.name.replace(/["\\\r\n]/g, "") || "file");
+    return [
+      `--${boundary}`,
+      `Content-Type: ${f.type || "application/octet-stream"}; name="${name}"`,
+      `Content-Disposition: attachment; filename="${name}"`,
+      "Content-Transfer-Encoding: base64",
+      "",
+      f.data.toString("base64").replace(/.{76}/g, "$&\r\n"),
+    ];
+  });
+  return [
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    "",
+    `--${boundary}`,
+    ...textPart,
+    ...parts,
+    `--${boundary}--`,
+  ];
+}
 
 /**
  * Reply in the guest's Gmail thread, from the connected mailbox, to the last
@@ -28,7 +58,7 @@ export type SentEmail = { id: string; to: string; cc: string[]; bcc: string[] };
 export async function sendGmailReply(
   conversationId: string,
   text: string,
-  opts: { replyAll?: boolean; cc?: string[]; bcc?: string[] } = {},
+  opts: { replyAll?: boolean; cc?: string[]; bcc?: string[]; files?: EmailFile[] } = {},
 ): Promise<SentEmail> {
   const conn = await gmailConnection();
   if (!conn) throw new Error("Gmail is not connected. An admin can connect it in Settings.");
@@ -78,17 +108,16 @@ export async function sendGmailReply(
     `Subject: ${word(subject)}`,
     ...(raw.messageId ? [`In-Reply-To: ${raw.messageId}`] : []),
     ...(references ? [`References: ${references}`] : []),
-    "MIME-Version: 1.0",
-    'Content-Type: text/plain; charset="UTF-8"',
-    "Content-Transfer-Encoding: base64",
-    "",
-    b64(text).replace(/.{76}/g, "$&\r\n"),
+    ...content(text, opts.files),
   ].join("\r\n");
 
-  const sent = await gmail<{ id: string }>(conn, "/messages/send", {
-    method: "POST",
-    body: { raw: Buffer.from(mime, "utf8").toString("base64url"), threadId: raw.threadId },
-  });
+  // With a file the email can be large: Gmail's upload endpoint takes up to 35 MB.
+  const sent = opts.files?.length
+    ? await gmailSendLarge(conn, mime, raw.threadId)
+    : await gmail<{ id: string }>(conn, "/messages/send", {
+        method: "POST",
+        body: { raw: Buffer.from(mime, "utf8").toString("base64url"), threadId: raw.threadId },
+      });
   return { id: sent.id, to, cc, bcc };
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AlertCircle, ChevronDown, ChevronUp, Reply, ReplyAll } from "lucide-react";
+import { AlertCircle, ChevronDown, ChevronUp, Paperclip, Reply, ReplyAll } from "lucide-react";
 import { Avatar, cx } from "@/components/ui";
 import { clock, dayLabel } from "@/lib/format";
 
@@ -52,7 +52,9 @@ export function EmailCard({
   onToggle,
   onReply,
   onRetry,
+  files = [],
 }: {
+  files?: { url: string; type: string; name: string }[];
   m: EmailMessage;
   name: string;
   avatar?: string | null;
@@ -102,6 +104,22 @@ export function EmailCard({
       {open && (
         <div className="border-t border-slate-100 px-4 pt-3 pb-3">
           <div className="text-sm leading-relaxed whitespace-pre-line text-slate-800 [overflow-wrap:anywhere]">{text || "(empty email)"}</div>
+          {files.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {files.map((f) => (
+                <a
+                  key={f.url}
+                  href={f.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex max-w-full items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100"
+                >
+                  <Paperclip className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                  <span className="truncate">{f.name}</span>
+                </a>
+              ))}
+            </div>
+          )}
           {quoted && (
             <div className="mt-2">
               <button

@@ -1,12 +1,12 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { AlertCircle, BookOpen, Check, CheckCheck, CheckCircle2, ChevronLeft, ChevronRight, Clock, Download, ExternalLink, FileText, ImageOff, Paperclip, Reply, RotateCcw, Send, ShieldAlert, SmilePlus, Sparkles, X } from "lucide-react";
 import { useApp } from "@/components/app-shell";
 import { Avatar, btn, ChannelBadge, cx } from "@/components/ui";
 import { CATEGORY_LABEL, CHANNEL_LABEL, clock, dayLabel, messagePreview, parseMessage, type MessageImage } from "@/lib/format";
 import { useLoader } from "@/lib/use-loader";
-import { ACCEPT, checkAttachment } from "@/lib/whatsapp/media";
+import { ACCEPT, checkFileFor } from "@/lib/whatsapp/media";
 import { EmailCard } from "./email-card";
 import type { ConversationRow, StaffOption } from "./inbox";
 
@@ -65,7 +65,9 @@ export function Thread({
   const [file, setFile] = useState<File | null>(null);
 
   const picker = useRef<HTMLInputElement>(null);
-  const canAttach = conversation.channel === "whatsapp";
+  const canAttach = conversation.channel === "whatsapp" || conversation.channel === "gmail";
+  // WhatsApp chats are drawn like the WhatsApp app.
+  const isWa = conversation.channel === "whatsapp";
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   // Email: reply to everyone on the email (To + Cc), not just the sender.
   const [replyAll, setReplyAll] = useState(false);
@@ -86,7 +88,7 @@ export function Thread({
 
   function choose(f: File | undefined) {
     if (!f) return;
-    const problem = checkAttachment(f);
+    const problem = checkFileFor(conversation.channel, f);
     if (problem) return setSendError(problem);
     setSendError(null);
     setFile(f);
@@ -113,7 +115,7 @@ export function Thread({
     // Stored copies of photos (the original Airbnb links expire after an hour).
     // WhatsApp photos, voice notes and files are stored copies too. Fetched
     // before the messages are shown, so the thread appears once, complete.
-    if (conversation.channel === "whatsapp" || rows.some((m) => parseMessage(m.body).images.length)) {
+    if (conversation.channel === "whatsapp" || conversation.channel === "gmail" || rows.some((m) => parseMessage(m.body).images.length)) {
       const res = await api("/api/attachments", { json: { conversationId: conversation.id } });
       if (res.ok) {
         // Every call signs fresh links; keep the ones already on screen so the
@@ -439,14 +441,21 @@ export function Thread({
       )}
 
       {/* messages */}
-      <div className="scroll-thin relative min-h-0 flex-1 overflow-y-auto px-5 py-4">
+      <div
+        className={cx("scroll-thin relative min-h-0 flex-1 overflow-y-auto py-4", isWa ? "bg-[#efeae2] px-[6%]" : "px-5")}
+        style={isWa ? { backgroundImage: WA_WALLPAPER } : undefined}
+      >
         {loaded && messages.length === 0 && <p className="text-center text-sm text-slate-500">No messages yet.</p>}
         {isEmail && conversation.subject && (
           <h2 className="mb-1 text-lg font-semibold text-slate-900">{conversation.subject.replace(/^(re|fw|fwd):\s*/i, "")}</h2>
         )}
         {rows.map(({ m, newDay, grouped }) => (
           <Fragment key={m.id}>
-            {newDay && (
+            {newDay && isWa ? (
+              <div className="sticky top-0 z-10 my-3 flex justify-center">
+                <span className="rounded-lg bg-white px-3 py-1 text-xs text-[#54656f] shadow-sm">{dayLabel(when(m))}</span>
+              </div>
+            ) : newDay && (
               <div className="my-4 flex items-center gap-3 text-[11px] font-medium text-slate-400">
                 <span className="h-px flex-1 bg-slate-200" />
                 {dayLabel(when(m))}
@@ -454,7 +463,12 @@ export function Thread({
               </div>
             )}
             {m.content_type === "system" ? (
-              <div className="mx-auto my-2 max-w-[80%] rounded-lg bg-slate-100 px-3 py-1.5 text-center text-xs text-slate-500">
+              <div
+                className={cx(
+                  "mx-auto my-2 w-fit max-w-[80%] rounded-lg px-3 py-1.5 text-center text-xs",
+                  isWa ? "bg-[#ffeecd] text-[#54656f] shadow-sm" : "bg-slate-100 text-slate-500",
+                )}
+              >
                 {m.body} · {clock(when(m))}
               </div>
             ) : isEmail ? (
@@ -476,16 +490,26 @@ export function Thread({
                       : undefined
                   }
                   onRetry={canWrite ? () => retry(m.id) : undefined}
+                  files={[
+                    ...(photos[m.id] ?? []).map((url, i) => ({ url, type: "image/*", name: `Photo ${i + 1}` })),
+                    ...(files[m.id] ?? []),
+                  ]}
                 />
               </div>
             ) : (
-              <div className={cx("flex items-end gap-2", m.direction === "outbound" ? "justify-end" : "justify-start", grouped ? "mt-1" : "mt-3")}>
-                {m.direction === "inbound" && (
+              <div
+                className={cx(
+                  "flex items-end gap-2",
+                  m.direction === "outbound" ? "justify-end" : "justify-start",
+                  isWa ? (grouped ? "mt-0.5" : "mt-2.5") : grouped ? "mt-1" : "mt-3",
+                )}
+              >
+                {m.direction === "inbound" && !isWa && (
                   <span className={cx("w-7 shrink-0", grouped && "invisible")}>
                     <Avatar name={guestName} size="sm" />
                   </span>
                 )}
-                <div className={cx("group relative max-w-[72%]", m.direction === "outbound" && "items-end")}>
+                <div className={cx("group relative", isWa ? "max-w-[65%]" : "max-w-[72%]", m.direction === "outbound" && "items-end")}>
                   {canQuote(m) && (
                     <div
                       className={cx(
@@ -529,6 +553,29 @@ export function Thread({
                       )}
                     </div>
                   )}
+                  {isWa ? (
+                    <WaBubble
+                      m={m}
+                      tail={!grouped}
+                      name={m.direction === "outbound" && !grouped && m.sent_by !== profile.id ? who(m) : null}
+                      title={m.direction === "outbound" ? replyLabel(m) : undefined}
+                      photos={photos}
+                      files={files}
+                      onOpen={openPhoto}
+                      quote={
+                        m.raw_payload?.reply_to ? (
+                          <Quote
+                            quoted={byWamid.get(m.raw_payload.reply_to) ?? null}
+                            who={(q) => who(q)}
+                            dark={false}
+                            padded={false}
+                            photos={photos}
+                            files={files}
+                          />
+                        ) : null
+                      }
+                    />
+                  ) : (
                   <div
                     className={cx(
                       "rounded-2xl text-sm leading-relaxed shadow-sm",
@@ -560,8 +607,9 @@ export function Thread({
                       </p>
                     )}
                   </div>
+                  )}
                   {m.raw_payload?.reactions && Object.keys(m.raw_payload.reactions).length > 0 && (
-                    <div className={cx("-mt-2 flex px-2", m.direction === "outbound" ? "justify-end" : "justify-start")}>
+                    <div className={cx("flex px-2", m.direction === "outbound" ? "justify-end" : "justify-start", isWa ? "relative z-1 -mt-1.5" : "-mt-2")}>
                       <span className="relative inline-flex gap-0.5 rounded-full bg-white px-1.5 py-0.5 text-sm shadow ring-1 ring-slate-200">
                         {Object.entries(m.raw_payload.reactions).map(([by, e]) => (
                           <span key={by} title={by === "team" ? "Your team" : guestName}>{e}</span>
@@ -569,7 +617,7 @@ export function Thread({
                       </span>
                     </div>
                   )}
-                  {!grouped || m.status === "failed" ? (
+                  {!isWa && (!grouped || m.status === "failed") ? (
                     <div className={cx("mt-1 flex items-center gap-1 px-1 text-[11px] text-slate-400", m.direction === "outbound" && "justify-end")}>
                       {m.direction === "outbound" && <span>{replyLabel(m)} ·</span>}
                       <span>{clock(when(m))}</span>
@@ -588,7 +636,7 @@ export function Thread({
                     </div>
                   )}
                 </div>
-                {m.direction === "outbound" && (
+                {m.direction === "outbound" && !isWa && (
                   <span className={cx("w-7 shrink-0", grouped && "invisible")} title={replyLabel(m)}>
                     <Avatar name={author(m)?.full_name ?? "Host"} src={author(m)?.avatar_url} size="sm" />
                   </span>
@@ -602,7 +650,7 @@ export function Thread({
 
       {/* composer */}
       {canWrite && canReply ? (
-        <form onSubmit={send} className="border-t border-slate-200 bg-white px-5 py-3">
+        <form onSubmit={send} className={cx("border-t border-slate-200 px-5 py-3", isWa ? "bg-[#f0f2f5]" : "bg-white")}>
           {sendError && (
             <p className="mb-2 flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
               <AlertCircle className="h-4 w-4" /> {sendError}
@@ -693,7 +741,9 @@ export function Thread({
                 )}
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-slate-900">{file.name}</p>
-                  <p className="text-xs text-slate-500">{(file.size / 1024 / 1024).toFixed(1)} MB · the text below is sent as its caption</p>
+                  <p className="text-xs text-slate-500">
+                    {(file.size / 1024 / 1024).toFixed(1)} MB · {isEmail ? "attached to your reply" : "the text below is sent as its caption"}
+                  </p>
                 </div>
                 <button type="button" onClick={() => setFile(null)} className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Remove file">
                   <X className="h-4 w-4" />
@@ -709,7 +759,7 @@ export function Thread({
               }}
               rows={2}
               maxLength={5000}
-              placeholder={file ? "Add a caption (optional)…" : `Reply to ${guestName} on ${CHANNEL_LABEL[conversation.channel] ?? "this channel"}…`}
+              placeholder={file && !isEmail ? "Add a caption (optional)…" :`Reply to ${guestName} on ${CHANNEL_LABEL[conversation.channel] ?? "this channel"}…`}
               className="block w-full resize-none rounded-t-xl border-0 bg-transparent px-3.5 pt-3 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none"
               aria-label="Reply"
             />
@@ -719,14 +769,14 @@ export function Thread({
                   <input
                     ref={picker}
                     type="file"
-                    accept={ACCEPT}
+                    accept={isEmail ? undefined : ACCEPT}
                     className="hidden"
                     onChange={(e) => {
                       choose(e.target.files?.[0]);
                       e.target.value = "";
                     }}
                   />
-                  <button type="button" onClick={() => picker.current?.click()} className={btn.ghost} title="Attach a photo, video, voice note or file">
+                  <button type="button" onClick={() => picker.current?.click()} className={btn.ghost} title={isEmail ? "Attach a file (up to 20 MB)" : "Attach a photo, video, voice note or file"}>
                     <Paperclip className="h-4 w-4" /> Attach
                   </button>
                 </>
@@ -799,6 +849,111 @@ function DeliveryIcon({ status }: { status: Message["status"] }) {
   );
 }
 
+/** WhatsApp's beige chat wallpaper with a faint doodle pattern. */
+const WA_DOODLES =
+  "<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180' fill='none' stroke='#d6cdbf' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'>" +
+  "<circle cx='22' cy='24' r='8'/><path d='M18 22h.01M26 22h.01M18 28c2 2 6 2 8 0'/>" +
+  "<path d='M70 14l8 14H62z'/>" +
+  "<rect x='118' y='14' width='22' height='15' rx='3'/><path d='M118 18l11 7 11-7'/>" +
+  "<path d='M160 60c2-5 9-5 9 1 0 5-9 10-9 10s-9-5-9-10c0-6 7-6 9-1z'/>" +
+  "<path d='M30 80c6-8 14-8 20 0M34 76v-6M46 76v-6'/>" +
+  "<circle cx='100' cy='78' r='10'/><path d='M100 72v6l4 3'/>" +
+  "<path d='M14 132l10-10 10 10-10 10z'/>" +
+  "<path d='M64 128h20v16H64zM68 128v-4h12v4'/>" +
+  "<path d='M120 120l4 9 9 1-7 6 2 9-8-5-8 5 2-9-7-6 9-1z'/>" +
+  "<path d='M150 150c5-4 12 0 10 6M40 168c4-6 12-6 16 0'/>" +
+  "<circle cx='96' cy='166' r='3'/><circle cx='160' cy='110' r='2'/>" +
+  "</svg>";
+const WA_WALLPAPER = `url("data:image/svg+xml,${encodeURIComponent(WA_DOODLES)}")`;
+
+/** WhatsApp ticks: one grey (sent), two grey (delivered), two blue (read). */
+function WaTicks({ status }: { status: Message["status"] }) {
+  const label = { pending: "Sending", sent: "Sent", delivered: "Delivered", read: "Read", failed: "Failed" }[status];
+  const Icon = status === "pending" ? Clock : status === "failed" ? AlertCircle : status === "sent" ? Check : CheckCheck;
+  return (
+    <span title={label} className={cx("inline-flex", status === "read" ? "text-[#53bdeb]" : status === "failed" ? "text-red-600" : "")}>
+      <Icon className="h-4 w-4" />
+      <span className="sr-only">{label}</span>
+    </span>
+  );
+}
+
+/** One WhatsApp message, drawn like the WhatsApp app: green (ours) or white bubble, tail, time and ticks inside. */
+function WaBubble({
+  m,
+  tail,
+  name,
+  title,
+  photos,
+  files,
+  onOpen,
+  quote,
+}: {
+  m: Message;
+  tail: boolean;
+  name: string | null;
+  title?: string;
+  photos: Record<string, string[]>;
+  files: Record<string, StoredFile[]>;
+  onOpen: (src: string) => void;
+  quote: ReactNode;
+}) {
+  const out = m.direction === "outbound";
+  const { text, images } = messageParts(m.body, photos[m.id], files[m.id]);
+  const edited = !!m.raw_payload?.edited && !m.raw_payload?.deleted;
+  const deleted = !!m.raw_payload?.deleted;
+  const note = deleted ? "Deleted" : edited ? "Edited" : "";
+  const where: "text" | "photo" | "below" = text ? "text" : images.length ? "photo" : "below";
+  // Room at the end of the last line, so the time sits beside the text like on WhatsApp.
+  const spacer = <span aria-hidden className="inline-block align-bottom" style={{ width: (out ? 70 : 50) + (note ? 46 : 0) }} />;
+  const bg = out ? "bg-[#d9fdd3]" : "bg-white";
+
+  return (
+    <div
+      title={title}
+      className={cx(
+        "relative rounded-lg text-[14.2px] leading-4.75 text-[#111b21] shadow-[0_1px_0.5px_rgba(11,20,26,0.13)]",
+        bg,
+        tail && (out ? "rounded-tr-none" : "rounded-tl-none"),
+        images.length ? "w-72 max-w-full p-0.75" : "px-2 pt-1.5 pb-2",
+        m.status === "failed" && "ring-1 ring-red-400",
+      )}
+    >
+      {tail && (
+        <span
+          aria-hidden
+          className={cx(
+            "absolute top-0 h-3 w-2",
+            bg,
+            out ? "-right-2 [clip-path:polygon(0_0,100%_0,0_100%)]" : "-left-2 [clip-path:polygon(0_0,100%_0,100%_100%)]",
+          )}
+        />
+      )}
+      {name && <p className={cx("mb-0.5 text-[12.8px] font-medium text-[#027eb5]", images.length > 0 && "px-1.5 pt-1")}>{name}</p>}
+      {quote}
+      <div
+        className={cx(deleted && "text-[#667781] line-through")}
+        title={m.raw_payload?.original_body && m.raw_payload.original_body !== m.body ? `First version: ${m.raw_payload.original_body}` : undefined}
+      >
+        <MessageBody body={m.body} stored={photos[m.id]} files={files[m.id]} onOpen={onOpen} tail={where === "text" ? spacer : undefined} compact />
+      </div>
+      <span
+        className={cx(
+          "flex items-center gap-1 text-[11px] leading-none whitespace-nowrap",
+          where === "below" ? "mt-1 justify-end" : "absolute",
+          where === "text" && (images.length ? "right-2.5 bottom-2" : "right-2 bottom-1.5"),
+          where === "photo" && "right-2.5 bottom-2 text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.6)]",
+          where !== "photo" && "text-[#667781]",
+        )}
+      >
+        {note && <span className="italic">{note}</span>}
+        {clock(when(m))}
+        {out && <WaTicks status={m.status} />}
+      </span>
+    </div>
+  );
+}
+
 /** Text plus any photos (Airbnb sends them as links); the HTML itself is never rendered. */
 type StoredFile = { url: string; type: string; name: string };
 
@@ -818,29 +973,45 @@ function MessageBody({
   stored,
   files,
   onOpen,
+  tail,
+  compact,
 }: {
   body: string | null;
   stored?: string[];
   files?: StoredFile[];
   onOpen?: (src: string) => void;
+  /** Placed at the end of the text (room for the time in a WhatsApp bubble). */
+  tail?: ReactNode;
+  /** WhatsApp bubble: tighter caption, rounded photos. */
+  compact?: boolean;
 }) {
   const { text, images } = messageParts(body, stored, files);
   if (images.length) {
     // WhatsApp style: the photo fills the bubble, the caption sits underneath.
     return (
       <>
-        <div className={cx("grid gap-0.5", images.length > 1 && "grid-cols-2")}>
+        <div className={cx("grid gap-0.5", images.length > 1 && "grid-cols-2", compact && "overflow-hidden rounded-md")}>
           {images.map((img) => (
             <Photo key={img.src} image={img} onOpen={onOpen} />
           ))}
         </div>
-        {text && <p className="px-3 py-2 whitespace-pre-wrap wrap-break-word">{text}</p>}
+        {text && (
+          <p className={cx("whitespace-pre-wrap wrap-break-word", compact ? "px-1.5 pt-1.5 pb-1" : "px-3 py-2")}>
+            {text}
+            {tail}
+          </p>
+        )}
       </>
     );
   }
   return (
     <>
-      {text && <p className="whitespace-pre-wrap wrap-break-word">{text}</p>}
+      {text && (
+        <p className="whitespace-pre-wrap wrap-break-word">
+          {text}
+          {tail}
+        </p>
+      )}
       {files?.map((f) => (
         <div key={f.url} className={cx(text || images.length ? "mt-2" : "")}>
           {f.type.startsWith("audio/") ? (

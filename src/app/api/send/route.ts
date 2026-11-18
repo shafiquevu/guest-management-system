@@ -1,11 +1,11 @@
 import { canSeeConversation, errorResponse, requireStaff } from "@/lib/auth/staff";
 import { beds24, isConfigured } from "@/lib/beds24/client";
-import { emailList, sendGmailReply } from "@/lib/gmail/send";
+import { emailList, sendGmailReply, type EmailFile } from "@/lib/gmail/send";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { refreshConversation } from "@/lib/sync/beds24";
 import { BUCKET } from "@/lib/attachments";
 import { sendWhatsAppMedia, sendWhatsAppText, whatsappConfigured } from "@/lib/whatsapp/client";
-import { attachmentBody, checkAttachment, mediaKind, safeFileName } from "@/lib/whatsapp/media";
+import { attachmentBody, checkFileFor, mediaKind, safeFileName } from "@/lib/whatsapp/media";
 
 export const maxDuration = 30;
 
@@ -93,13 +93,15 @@ export async function POST(request: Request) {
     }
 
     if (attachment) {
-      if (!viaWhatsApp) return Response.json({ error: "Attachments can be sent on WhatsApp conversations only." }, { status: 400 });
+      if (!viaWhatsApp && !viaGmail) {
+        return Response.json({ error: "Attachments can be sent on WhatsApp and email conversations only." }, { status: 400 });
+      }
       // Only files uploaded for this organisation, through our upload slot.
       if (!attachment.path.startsWith(`${conversation.organization_id}/outbox/`) || attachment.path.includes("..")) {
         return Response.json({ error: "Unknown attachment." }, { status: 400 });
       }
       if (!row && attachment.size) {
-        const problem = checkAttachment(attachment as { name: string; type: string; size: number });
+        const problem = checkFileFor(conversation.channel, attachment as { name: string; type: string; size: number });
         if (problem) return Response.json({ error: problem }, { status: 400 });
       }
     }
@@ -151,7 +153,8 @@ export async function POST(request: Request) {
             status: "pending",
             sender_name: staff.fullName,
             sent_by: staff.id,
-            body: attachment && kind ? attachmentBody(kind, fileName, text) : text,
+            // Email: the file shows as a chip on the email card, so the body stays the text.
+            body: attachment && kind ? (viaGmail ? text || `📎 ${fileName}` : attachmentBody(kind, fileName, text)) : text,
             ...(attachment || replyTo || (viaGmail && (replyAll || addCc.length || addBcc.length))
               ? {
                   raw_payload: {
@@ -218,7 +221,13 @@ export async function POST(request: Request) {
     let emailSent: { to: string; cc: string[]; bcc: string[] } | null = null;
     if (viaGmail) {
       try {
-        const sent = await sendGmailReply(conversation.id, text, { replyAll, cc: addCc, bcc: addBcc });
+        let files: EmailFile[] = [];
+        if (attachment) {
+          const { data: blob, error: readError } = await db.storage.from(BUCKET).download(attachment.path);
+          if (readError || !blob) throw new Error(`The file could not be read: ${readError?.message ?? "not found"}`);
+          files = [{ name: fileName, type: attachment.type, data: Buffer.from(await blob.arrayBuffer()) }];
+        }
+        const sent = await sendGmailReply(conversation.id, text, { replyAll, cc: addCc, bcc: addBcc, files });
         providerResponse = sent;
         emailSent = sent;
         externalId = `gmail:${sent.id}`; // the next sync recognises it and doesn't import it twice

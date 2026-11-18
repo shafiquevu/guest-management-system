@@ -45,6 +45,18 @@ export function checkAttachment(file: { name: string; type: string; size: number
   return null;
 }
 
+/** Email attachments: any file type, up to 20 MB (Gmail's limit is 25 MB; the bucket's is 20). */
+export function checkEmailAttachment(file: { name: string; size: number }): string | null {
+  if (!file.name || !file.size) return "That file is empty.";
+  if (file.size > LIMIT.document) return `Email attachments can be up to 20 MB. This one is ${(file.size / MB).toFixed(1)} MB.`;
+  return null;
+}
+
+/** null when the file can go out on this channel, otherwise why not. */
+export function checkFileFor(channel: string, file: { name: string; type: string; size: number }): string | null {
+  return channel === "gmail" ? checkEmailAttachment(file) : checkAttachment(file);
+}
+
 /** The thread body for a sent attachment, matching how received ones are written. */
 export function attachmentBody(kind: WaMediaKind, fileName: string, caption: string): string {
   const head = kind === "document" ? `${LABEL.document} (${fileName})` : LABEL[kind];

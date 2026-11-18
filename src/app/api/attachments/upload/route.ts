@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { BUCKET, ensureBucket } from "@/lib/attachments";
 import { canSeeConversation, errorResponse, requireStaff } from "@/lib/auth/staff";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { checkAttachment, safeFileName } from "@/lib/whatsapp/media";
+import { checkFileFor, safeFileName } from "@/lib/whatsapp/media";
 
 /**
  * A one-time upload slot for a file staff are about to send.
@@ -28,10 +28,10 @@ export async function POST(request: Request) {
     if (!conversation || !(await canSeeConversation(staff, conversation))) {
       return Response.json({ error: "Conversation not found." }, { status: 404 });
     }
-    if (conversation.channel !== "whatsapp") {
-      return Response.json({ error: "Attachments can be sent on WhatsApp conversations only." }, { status: 400 });
+    if (conversation.channel !== "whatsapp" && conversation.channel !== "gmail") {
+      return Response.json({ error: "Attachments can be sent on WhatsApp and email conversations only." }, { status: 400 });
     }
-    const problem = checkAttachment(file);
+    const problem = checkFileFor(conversation.channel, file);
     if (problem) return Response.json({ error: problem }, { status: 400 });
 
     await ensureBucket();

@@ -172,3 +172,34 @@ export async function gmail<T>(
   if (!res.ok) throw new GmailError(`Gmail ${res.status}: ${body?.error?.message ?? "request failed"}`, res.status);
   return body as T;
 }
+
+/**
+ * Send a whole email (MIME) through Gmail's upload endpoint, which takes
+ * messages up to 35 MB: used when the email carries a file.
+ */
+export async function gmailSendLarge(conn: GmailConnection, mime: string, threadId?: string): Promise<{ id: string; threadId: string }> {
+  const token = await accessToken(conn);
+  const boundary = `gm-${crypto.randomUUID()}`;
+  const body = [
+    `--${boundary}`,
+    "Content-Type: application/json; charset=UTF-8",
+    "",
+    JSON.stringify(threadId ? { threadId } : {}),
+    `--${boundary}`,
+    "Content-Type: message/rfc822",
+    "",
+    mime,
+    `--${boundary}--`,
+    "",
+  ].join("\r\n");
+  const res = await fetch("https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=multipart", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": `multipart/related; boundary=${boundary}` },
+    body,
+    cache: "no-store",
+    signal: AbortSignal.timeout(60_000),
+  });
+  const out = await res.json().catch(() => null);
+  if (!res.ok) throw new GmailError(`Gmail ${res.status}: ${out?.error?.message ?? "request failed"}`, res.status);
+  return out as { id: string; threadId: string };
+}
