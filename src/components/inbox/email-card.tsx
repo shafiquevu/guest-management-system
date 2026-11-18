@@ -72,7 +72,9 @@ export function EmailCard({
   const from = m.sender_address || addresses(raw.from)[0] || "";
   const to = raw.to || m.recipient_address || "";
   const cc = raw.cc || "";
-  const { text, quoted } = splitQuoted(m.body ?? "");
+  // The stored body ends with "📎 file names"; once the files themselves are shown, that line goes.
+  const body = files.length ? (m.body ?? "").replace(/\n*📎 [^\n]*$/u, "").replace(/^📎 [^\n]*$/u, "") : (m.body ?? "");
+  const { text, quoted } = splitQuoted(body);
   const outbound = m.direction === "outbound";
 
   return (

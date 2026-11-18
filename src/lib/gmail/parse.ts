@@ -80,7 +80,19 @@ export function bodyText(m: GmailMessage): string {
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-/** Attachment names, so staff know something was attached even before attachments are supported. */
+export type EmailAttachment = { name: string; type: string; size: number; attachmentId: string };
+
+/** Every attached file in an email, with Gmail's id to download it. */
+export function attachmentParts(part: GmailPart | undefined, acc: EmailAttachment[] = []): EmailAttachment[] {
+  if (!part) return acc;
+  if (part.filename && part.body?.attachmentId) {
+    acc.push({ name: part.filename, type: part.mimeType || "application/octet-stream", size: part.body.size ?? 0, attachmentId: part.body.attachmentId });
+  }
+  for (const p of part.parts ?? []) attachmentParts(p, acc);
+  return acc;
+}
+
+/** Attachment names, shown in the email text and given to the AI. */
 export function attachmentNames(part: GmailPart | undefined, acc: string[] = []): string[] {
   if (!part) return acc;
   if (part.filename && part.body?.attachmentId) acc.push(part.filename);

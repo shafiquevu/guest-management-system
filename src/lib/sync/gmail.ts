@@ -1,7 +1,9 @@
 import "server-only";
 
 import { gmail, gmailConnection, GmailError, type GmailConnection } from "@/lib/gmail/client";
-import { address, attachmentNames, bodyText, header, isGuestMail, type GmailMessage } from "@/lib/gmail/parse";
+import { BUCKET, ensureBucket } from "@/lib/attachments";
+import { address, attachmentNames, attachmentParts, bodyText, header, isGuestMail, type GmailMessage } from "@/lib/gmail/parse";
+import { safeFileName } from "@/lib/whatsapp/media";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { refreshConversation, type SyncReport } from "@/lib/sync/beds24";
 
@@ -60,11 +62,15 @@ export async function syncGmail(options: { maxAgeDays?: number } = {}): Promise<
     for (let i = 0; i < ids.length; i += 200) {
       const { data } = await db
         .from("messages")
-        .select("external_message_id")
+        .select("external_message_id, files:raw_payload->attachments, message_attachments(id)")
         .eq("organization_id", conn.organizationId)
         .eq("channel", "gmail")
         .in("external_message_id", ids.slice(i, i + 200));
-      for (const r of data ?? []) known.add(r.external_message_id);
+      for (const r of data ?? []) {
+        // An email whose files aren't stored yet is read again, so they get stored.
+        const filesMissing = Array.isArray(r.files) && r.files.length > 0 && !(r.message_attachments as unknown[] | null)?.length;
+        if (!filesMissing) known.add(r.external_message_id);
+      }
     }
     const threads = [...new Set(listed.filter((m) => !known.has(`gmail:${m.id}`)).map((m) => m.threadId))];
 
@@ -204,10 +210,67 @@ async function syncThread(conn: GmailConnection, thread: Thread, report: SyncRep
     newInbound = (inserted ?? []).filter((m) => m.direction === "inbound").length;
   }
 
+  await saveEmailFiles(conn, conversation.id, messages, report);
+
   const reopen = newInbound > 0 && ["resolved", "archived"].includes(conversation.status);
   await refreshConversation(conversation.id, reopen);
   if (reopen) report.conversationsReopened++;
   report.conversationsTouched++;
+}
+
+const FILE_LIMIT = 20 * 1024 * 1024; // the storage bucket's limit
+const FILES_PER_EMAIL = 10;
+
+/**
+ * Copy the files attached to this thread's emails into private storage, so staff
+ * can open them in the inbox. Runs for every email that has files but none stored
+ * yet, which also fills in emails synced before files were supported. A file that
+ * cannot be fetched is skipped and reported; it never stops the sync.
+ */
+async function saveEmailFiles(conn: GmailConnection, conversationId: string, messages: GmailMessage[], report: SyncReport) {
+  const withFiles = messages
+    .map((m) => ({ m, files: attachmentParts(m.payload).filter((f) => f.size <= FILE_LIMIT).slice(0, FILES_PER_EMAIL) }))
+    .filter((x) => x.files.length);
+  if (!withFiles.length) return;
+
+  const db = supabaseAdmin();
+  const { data: rows } = await db
+    .from("messages")
+    .select("id, external_message_id, message_attachments(id)")
+    .eq("conversation_id", conversationId)
+    .in("external_message_id", withFiles.map((x) => `gmail:${x.m.id}`));
+  const missing = new Map(
+    (rows ?? [])
+      .filter((r) => !(r.message_attachments as unknown[] | null)?.length)
+      .map((r) => [r.external_message_id as string, r.id as string]),
+  );
+  if (!missing.size) return;
+  await ensureBucket();
+
+  for (const { m, files } of withFiles) {
+    const messageId = missing.get(`gmail:${m.id}`);
+    if (!messageId) continue;
+    for (const [i, f] of files.entries()) {
+      try {
+        const got = await gmail<{ data?: string }>(conn, `/messages/${m.id}/attachments/${f.attachmentId}`);
+        if (!got?.data) continue;
+        const bytes = Buffer.from(got.data, "base64url");
+        const path = `${conn.organizationId}/gmail/${m.id}/${i}-${safeFileName(f.name)}`;
+        const { error } = await db.storage.from(BUCKET).upload(path, bytes, { contentType: f.type, upsert: true });
+        if (error) throw new Error(error.message);
+        await db.from("message_attachments").insert({
+          organization_id: conn.organizationId,
+          message_id: messageId,
+          file_name: f.name,
+          file_type: f.type,
+          file_size: bytes.length,
+          storage_path: path,
+        });
+      } catch (e) {
+        report.errors.push(`email file ${f.name}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  }
 }
 
 /** The guest behind an email address: an existing one (from a booking) if we know the address. */
