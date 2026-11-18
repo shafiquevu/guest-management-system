@@ -253,33 +253,33 @@ export function Inbox() {
       {/* ── list ── */}
       <section className="flex min-h-0 flex-col border-r border-slate-200 bg-white">
         <div className="space-y-3 border-b border-slate-100 p-4">
-          <div className="flex items-center justify-between gap-2">
-            <h1 className="text-lg font-semibold tracking-tight text-slate-900">Inbox</h1>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500">{visible.length} conversations</span>
-              {profile.role !== "read_only" && (
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h1 className="text-lg leading-tight font-semibold tracking-tight text-slate-900">Inbox</h1>
+              <p className="truncate text-xs text-slate-500">{visible.length} conversations</p>
+            </div>
+            {profile.role !== "read_only" && (
+              <div className="flex shrink-0 items-center gap-2">
                 <button
                   type="button"
                   onClick={syncNow}
                   disabled={syncing}
-                  title="Check email and Beds24 for new messages now"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                  title="Sync now: check email and Beds24 for new messages"
+                  aria-label="Sync now"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-60"
                 >
-                  <RefreshCw className={cx("h-3.5 w-3.5", syncing && "animate-spin")} />
-                  {syncing ? "Syncing…" : "Sync now"}
+                  <RefreshCw className={cx("h-4 w-4", syncing && "animate-spin")} />
                 </button>
-              )}
-              {profile.role !== "read_only" && (
                 <button
                   type="button"
                   onClick={() => setComposing(true)}
                   title="Write to a guest first (WhatsApp or email)"
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-500"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-indigo-600 px-3 text-xs font-medium whitespace-nowrap text-white shadow-sm hover:bg-indigo-500"
                 >
-                  <Plus className="h-3.5 w-3.5" /> New chat
+                  <Plus className="h-4 w-4" /> New chat
                 </button>
-              )}
-            </div>
+              </div>
+            )}
           </div>
           {composing && (
             <NewChat
