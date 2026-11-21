@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { canSeeConversation, errorResponse, requireStaff } from "@/lib/auth/staff";
 import { beds24, isConfigured } from "@/lib/beds24/client";
 import { emailList, sendGmailReply, type EmailFile } from "@/lib/gmail/send";
@@ -80,7 +81,7 @@ export async function POST(request: Request) {
 
     const { data: conversation } = await db
       .from("conversations")
-      .select("id, organization_id, channel, assigned_to, property_id, reservation_id, status, first_response_at")
+      .select("id, organization_id, channel, assigned_to, property_id, reservation_id, status, first_response_at, external_thread_id")
       .eq("id", conversationId)
       .single();
     if (!conversation || !(await canSeeConversation(staff, conversation))) {
@@ -124,8 +125,7 @@ export async function POST(request: Request) {
 
     let waNumber = "";
     if (viaWhatsApp) {
-      const { data: thread } = await db.from("conversations").select("external_thread_id").eq("id", conversation.id).single();
-      waNumber = String(thread?.external_thread_id ?? "").replace(/^whatsapp:/, "");
+      waNumber = String(conversation.external_thread_id ?? "").replace(/^whatsapp:/, "");
       if (!/^\d{7,15}$/.test(waNumber)) return Response.json({ error: "This chat has no WhatsApp number to reply to." }, { status: 400 });
     }
 
@@ -292,16 +292,24 @@ export async function POST(request: Request) {
       .eq("id", row.id);
 
     if (status === "sent") {
-      await refreshConversation(conversation.id);
-      if (!conversation.first_response_at) {
-        await db.from("conversations").update({ first_response_at: now }).eq("id", conversation.id);
-      }
-      await db.from("conversation_events").insert({
-        organization_id: conversation.organization_id,
-        conversation_id: conversation.id,
-        actor_id: staff.id,
-        event_type: "reply_sent",
-        data: { message_id: row.id },
+      // Bookkeeping runs after the answer goes back, so the sender isn't kept waiting.
+      const sentId = row.id;
+      after(async () => {
+        try {
+          await refreshConversation(conversation.id);
+          if (!conversation.first_response_at) {
+            await db.from("conversations").update({ first_response_at: now }).eq("id", conversation.id);
+          }
+          await db.from("conversation_events").insert({
+            organization_id: conversation.organization_id,
+            conversation_id: conversation.id,
+            actor_id: staff.id,
+            event_type: "reply_sent",
+            data: { message_id: sentId },
+          });
+        } catch (e) {
+          console.error("send bookkeeping:", e instanceof Error ? e.message : e);
+        }
       });
     }
 

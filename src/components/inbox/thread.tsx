@@ -57,7 +57,25 @@ export function Thread({
   onChanged: () => void;
 }) {
   const { supabase, api, canWrite, profile } = useApp();
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [stored, setMessages] = useState<Message[]>([]);
+  // Replies shown the moment Send is pressed (clock icon), until the saved row
+  // arrives -- like WhatsApp, instead of waiting for the whole send.
+  const [outbox, setOutbox] = useState<{ key: string; body: string; at: string; messageId?: string }[]>([]);
+  const messages = useMemo(() => {
+    const keys = new Set(stored.map((m) => m.external_message_id));
+    const ids = new Set(stored.map((m) => m.id));
+    const local: Message[] = outbox
+      .filter((o) => !keys.has(`local:${o.key}`) && !(o.messageId && ids.has(o.messageId)))
+      .map((o) => ({
+        id: `local-${o.key}`, direction: "outbound", status: "pending", body: o.body, content_type: "text",
+        sender_name: profile.full_name ?? null, sender_address: null, recipient_address: null, sent_by: profile.id,
+        provider_error: null, received_at: null, sent_at: null, created_at: o.at,
+        external_message_id: `local:${o.key}`, raw_payload: null,
+      }));
+    return local.length ? [...stored, ...local] : stored;
+  }, [stored, outbox, profile.id, profile.full_name]);
+  // Sends go out one after another, in the order they were written.
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
   const [loaded, setLoaded] = useState(false);
   const [photos, setPhotos] = useState<Record<string, string[]>>({});
   const [files, setFiles] = useState<Record<string, StoredFile[]>>({});
@@ -187,8 +205,51 @@ export function Thread({
     event?.preventDefault();
     const text = draft.trim();
     if ((!text && !file) || sending) return;
-    setSending(true);
     setSendError(null);
+
+    // Plain text: show it at once and clear the box; the send runs behind it.
+    if (!file) {
+      const key = crypto.randomUUID();
+      const quoting = replyTo;
+      const mail = { replyAll, cc, bcc };
+      setOutbox((o) => [...o, { key, body: text, at: new Date().toISOString() }]);
+      setDraft("");
+      setReplyTo(null);
+      setReplyAll(false);
+      setCc("");
+      setBcc("");
+      setCcOpen(false);
+      setAiNote(null);
+      queue.current = queue.current.then(async () => {
+        const res = await api("/api/send", {
+          json: {
+            conversationId: conversation.id,
+            body: text,
+            clientKey: key,
+            ...(quoting ? { replyToMessageId: quoting.id } : {}),
+            ...(isEmail && mail.replyAll ? { replyAll: true } : {}),
+            ...(isEmail && mail.cc.trim() ? { cc: mail.cc } : {}),
+            ...(isEmail && mail.bcc.trim() ? { bcc: mail.bcc } : {}),
+          },
+        });
+        if (res.data?.messageId) {
+          // the saved row (sent, or failed with Retry) takes over from here
+          setOutbox((o) => o.map((x) => (x.key === key ? { ...x, messageId: res.data.messageId } : x)));
+          if (!res.ok) setSendError(res.data?.error ?? "The reply could not be sent.");
+        } else {
+          // nothing was saved: take it off and give the text back
+          setOutbox((o) => o.filter((x) => x.key !== key));
+          setDraft((d) => (d.trim() ? d : text));
+          setSendError(res.data?.error ?? "The reply could not be sent.");
+        }
+        await load();
+        setOutbox((o) => o.filter((x) => x.key !== key || !x.messageId));
+        onChanged();
+      });
+      return;
+    }
+
+    setSending(true);
 
     // A file goes straight to private storage first, then the send references it.
     let attachment: { path: string; name: string; type: string; size: number } | undefined;
